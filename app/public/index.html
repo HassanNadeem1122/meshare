@@ -78,8 +78,9 @@
     <div class="card">
       <div class="stripe"></div>
       <div class="label">share a file</div>
-      <p style="color:var(--muted);font-size:14px;margin:6px 0 12px">Pick a file, get a link. Keep this tab open — it seeds the file. Everyone who downloads becomes a seeder too.</p>
-      <input type="file" id="share-file">
+      <p style="color:var(--muted);font-size:14px;margin:6px 0 12px">Pick a file — or a whole folder to host it as a P2P site. Keep this tab open — it seeds. Everyone who downloads becomes a seeder too.</p>
+      <div style="margin-bottom:8px"><span class="label" style="display:inline">file</span><br><input type="file" id="share-file"></div>
+      <div><span class="label" style="display:inline">or site folder</span><br><input type="file" id="share-folder" webkitdirectory multiple></div>
       <div><button class="btn" id="share-btn">Create link</button></div>
       <div class="link-box" id="link-box" hidden>
         <input id="share-link" readonly>
@@ -761,6 +762,41 @@ async function renderSite(entry) {
   log('Site is running locally in a sandboxed frame. You are seeding it to the next visitor.');
 }
 
+// ── browser-side site bundling: host a folder with zero install ────────────
+
+async function buildSiteBundleBrowser(fileList) {
+  const all = [...fileList].filter(f =>
+    !f.webkitRelativePath.includes('/node_modules/') && !/(^|\/)\./.test(f.webkitRelativePath || f.name));
+  // webkitRelativePath is "folder/sub/file"; strip the top folder. Synthetic
+  // File objects (tests) have no relative path - fall back to the bare name.
+  const rel = f => f.webkitRelativePath ? f.webkitRelativePath.split('/').slice(1).join('/') : f.name;
+  if (!all.length) throw new Error('folder contains no usable files');
+  if (all.length > 500) throw new Error(`too many files (${all.length} > 500)`);
+  const total = all.reduce((s, f) => s + f.size, 0);
+  if (total > 20 * 1024 * 1024) throw new Error(`site exceeds 20 MB (${(total / 1048576).toFixed(1)} MB)`);
+  const entry = all.some(f => rel(f) === 'index.html') ? 'index.html'
+    : (all.find(f => rel(f).endsWith('.html')) ? rel(all.find(f => rel(f).endsWith('.html'))) : null);
+  if (!entry) throw new Error('no .html entry file found in folder');
+  let offset = 0;
+  const filesMeta = [];
+  for (const f of all) {
+    const digest = await crypto.subtle.digest('SHA-256', await f.arrayBuffer());
+    filesMeta.push({
+      path: rel(f), size: f.size, offset,
+      sha256: [...new Uint8Array(digest)].map(x => x.toString(16).padStart(2, '0')).join('')
+    });
+    offset += f.size;
+  }
+  const manifest = new TextEncoder().encode(JSON.stringify({ kind: 'site', v: 1, entry, files: filesMeta }));
+  const lenBuf = new Uint8Array(4);
+  new DataView(lenBuf.buffer).setUint32(0, manifest.length, true);
+  const folderName = (all[0].webkitRelativePath || 'site').split('/')[0];
+  return {
+    blob: new Blob([SITE_MAGIC, lenBuf, manifest, ...all]),
+    fileCount: all.length, entry, siteName: folderName
+  };
+}
+
 // ── receive flow (link recipient) ──────────────────────────────────────────
 
 async function startReceive(fileId) {
@@ -893,8 +929,21 @@ async function startReceive(fileId) {
 // ── share flow (browser-only sender) ───────────────────────────────────────
 
 $('share-btn').onclick = async () => {
-  const file = $('share-file').files[0];
-  if (!file) return log('Choose a file first.', true);
+  let file = $('share-file').files[0];
+  let kind = 'file';
+  if ($('share-folder').files.length) {
+    $('share-btn').disabled = true;
+    try {
+      const b = await buildSiteBundleBrowser($('share-folder').files);
+      file = new File([b.blob], `${b.siteName}.mshare`, { type: 'application/octet-stream' });
+      kind = 'site';
+      log(`Site bundle built in-browser: ${b.fileCount} files, ${(file.size / 1048576).toFixed(2)} MB, entry ${b.entry} — hash-verified on arrival.`);
+    } catch (e) {
+      $('share-btn').disabled = false;
+      return log(`Could not bundle folder: ${e.message}`, true);
+    }
+  }
+  if (!file) return log('Choose a file or folder first.', true);
   $('share-btn').disabled = true;
   await turnLoaded;
   let fileId;
@@ -902,7 +951,7 @@ $('share-btn').onclick = async () => {
     const res = await fetch(`${MESHARE.apiBase}/api/shares`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fileName: file.name, size: file.size, mime: file.type })
+      body: JSON.stringify({ fileName: file.name, size: file.size, mime: file.type, kind })
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const reg = await res.json();
