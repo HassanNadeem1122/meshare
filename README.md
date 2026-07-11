@@ -64,6 +64,12 @@ No CLI? Open the [web app](https://meshare.just1hassanhere.workers.dev), pick a 
 | Rate limiting | Durable (cross-isolate) per-IP limits on registration, uploads, downloads, and credential minting |
 | P2P site hosting (v1) | `meshare site ./folder` — hash-verified bundles, sandboxed execution, visitors become mirrors |
 
+## Experimental: live rooms (`live/room.html`)
+
+A preview of real-time, serverless rooms. Everyone who opens the same room name connects **directly** to each other (full mesh, reusing the seeder-slot discovery pattern) for live **presence + chat** — no server stores a byte. Verified with 3 peers: presence, chat broadcast, and clean leave all sync.
+
+Honest scope: **ephemeral** — state is alive only while people are present and gone when the room empties (browser-pure P2P can't persist a room with nobody in it — every "decentralized" chat quietly runs relay servers for that). Best for ≤8 peers. Conflict-free shared *documents* (collaborative editing) would need a CRDT layer (Yjs) on top of this — not built yet.
+
 ## Known limitations — read before relying on it
 
 - **A fully closed tab cannot seed.** WebRTC only exists in open pages; no service worker can change that (browser platform constraint, not a bug). meshare's answer is instant re-seeding from cache when a tab reopens — not background seeding, which the web platform does not permit.
