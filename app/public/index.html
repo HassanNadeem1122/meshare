@@ -215,10 +215,34 @@ const turnLoaded = loadTurnCredentials();
 
 function idb() {
   return new Promise((res, rej) => {
-    const req = indexedDB.open('meshare', 1);
-    req.onupgradeneeded = () => req.result.createObjectStore('files');
+    const req = indexedDB.open('meshare', 2);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains('files')) db.createObjectStore('files');
+      // S3: per-asset cache keyed by SHA-256 - site updates only fetch changed files.
+      if (!db.objectStoreNames.contains('assets')) db.createObjectStore('assets');
+    };
     req.onsuccess = () => res(req.result);
     req.onerror = () => rej(req.error);
+  });
+}
+
+async function assetGet(sha) {
+  const db = await idb();
+  return new Promise((res, rej) => {
+    const req = db.transaction('assets').objectStore('assets').get(sha);
+    req.onsuccess = () => res(req.result || null);
+    req.onerror = () => rej(req.error);
+  });
+}
+
+async function assetPut(sha, blob) {
+  const db = await idb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('assets', 'readwrite');
+    tx.objectStore('assets').put(blob, sha);
+    tx.oncomplete = res;
+    tx.onerror = () => rej(tx.error);
   });
 }
 
@@ -400,6 +424,7 @@ function attachServeHandlers(conn, fileId, slot) {
   });
   conn.on('data', d => {
     if (d && d.type === 'request') serveFile(conn, d.fileId, slot, key, d.pw);
+    else if (d && d.type === 'request-range') serveRange(conn, key, d);
     else if (d && d.type === 'ack') log(`Mesh: ${conn.peer} confirmed: ${d.message}`);
   });
   conn.on('close', () => {
@@ -411,6 +436,31 @@ function attachServeHandlers(conn, fileId, slot) {
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// S3: byte-range serving so recipients can fetch manifest-first and per-asset.
+async function serveRange(conn, key, req) {
+  const entry = store.get(req.fileId);
+  if (!entry) return conn.send({ type: 'error', message: `no file ${req.fileId} here` });
+  if (entry.pwHash && req.pw !== entry.pwHash) {
+    conn.send({ type: 'error', message: 'password required or incorrect' });
+    return log(`Mesh: refused range request from ${conn.peer} — wrong or missing password.`, true);
+  }
+  const blob = entry.blob;
+  const from = Math.max(0, Number(req.from) || 0);
+  const to = Math.min(blob.size, Number(req.to) || 0);
+  if (to <= from) return conn.send({ type: 'error', message: 'bad range' });
+  conn.send({ type: 'range-meta', reqId: req.reqId, from, to, total: blob.size });
+  const CS = MESHARE.chunkSize;
+  for (let off = from; off < to; off += CS) {
+    if (!conn.open) return;
+    const buf = await blob.slice(off, Math.min(off + CS, to)).arrayBuffer();
+    conn.send(new Uint8Array(buf));
+    const p = livePeers.get(key); if (p) p.bytes += buf.byteLength;
+    while (conn.open && conn.dataChannel && conn.dataChannel.bufferedAmount > MESHARE.maxBufferedBytes) await sleep(50);
+  }
+  if (conn.open) conn.send({ type: 'range-done', reqId: req.reqId });
+  renderPeers();
+}
 
 async function serveFile(conn, fileId, slot, key, pw) {
   const entry = store.get(fileId);
@@ -535,9 +585,11 @@ async function completeReceive(fileId, entry, pwHash, sourceLabel) {
   save.href = URL.createObjectURL(entry.blob);
   save.download = entry.name;
   save.hidden = false;
-  save.click();
+  let isSite = false;
+  try { isSite = entry.blob.size >= 8 && await entry.blob.slice(0, 8).text() === SITE_MAGIC; } catch {}
+  if (!isSite) save.click();
   $('r-dot').className = 'dot on';
-  $('r-status').textContent = 'download complete — verified';
+  $('r-status').textContent = isSite ? 'site received — verified' : 'download complete — verified';
   log(`Transfer source: ${sourceLabel}.`);
   try {
     const { slot } = await claimSeederSlot(fileId);
@@ -547,6 +599,90 @@ async function completeReceive(fileId, entry, pwHash, sourceLabel) {
   } catch (e) { log(`Could not register as seeder: ${e.message}`, true); }
   renderLibrary();
   maybeOfferSite(fileId, entry);
+}
+
+// ── S3: range client + progressive site fetch with per-asset dedupe ────────
+
+function makeRangeClient(conn, pwHash) {
+  let active = null;
+  conn.on('data', async data => {
+    if (!active) return;
+    if (data && data.type === 'error') { const a = active; active = null; a.reject(new Error(data.message)); return; }
+    if (data && data.type === 'range-meta') { active.expect = data.to - data.from; return; }
+    if (data && data.type === 'range-done') {
+      const a = active; active = null;
+      if (a.received !== a.expect) a.reject(new Error(`range size mismatch: ${a.received}/${a.expect}`));
+      else a.resolve(new Blob(a.chunks));
+      return;
+    }
+    let buf = data;
+    if (buf instanceof Blob) buf = await buf.arrayBuffer();
+    if (buf instanceof ArrayBuffer || ArrayBuffer.isView(buf)) {
+      const view = buf instanceof ArrayBuffer ? new Uint8Array(buf) : new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+      active.chunks.push(view);
+      active.received += view.byteLength;
+      if (active.onProgress) active.onProgress(active.received, active.expect);
+    }
+  });
+  let seq = 0;
+  return function rangeFetch(fileId, from, to, onProgress, timeoutMs = 20000) {
+    return new Promise((resolve, reject) => {
+      if (active) return reject(new Error('range client busy'));
+      const reqId = ++seq;
+      active = { reqId, chunks: [], received: 0, expect: to - from, onProgress, resolve, reject };
+      const t = setTimeout(() => { if (active && active.reqId === reqId) { const a = active; active = null; a.reject(new Error('range request timed out')); } }, timeoutMs);
+      const wrap = fn => v => { clearTimeout(t); fn(v); };
+      active.resolve = wrap(resolve); active.reject = wrap(reject);
+      conn.send({ type: 'request-range', fileId, from, to, reqId, pw: pwHash || undefined });
+    });
+  };
+}
+
+async function fetchSiteProgressive(conn, fileId, info, pwHash) {
+  const rangeFetch = makeRangeClient(conn, pwHash);
+  $('r-status').textContent = 'fetching site manifest…';
+  const headLen = Math.min(info.size, 65536);
+  const head = await rangeFetch(fileId, 0, headLen);
+  if (await head.slice(0, 8).text() !== SITE_MAGIC) throw new Error('not a site bundle');
+  const mLen = new DataView(await head.slice(8, 12).arrayBuffer()).getUint32(0, true);
+  if (12 + mLen > headLen) throw new Error('manifest larger than head window');
+  const manifest = JSON.parse(await head.slice(12, 12 + mLen).text());
+  const dataStart = 12 + mLen;
+  log(`Mesh: manifest fetched (${manifest.files.length} assets) — loading per-asset with local dedupe cache.`);
+
+  // Priority: entry html, then code/styles, then everything else.
+  const prio = p => p === manifest.entry ? 0 : /\.(css|js)$/i.test(p) ? 1 : 2;
+  const ordered = [...manifest.files].sort((a, b) => prio(a.path) - prio(b.path));
+  const parts = new Map();
+  let fromCache = 0, fetched = 0, done = 0;
+  for (const f of ordered) {
+    const cached = await assetGet(f.sha256);
+    if (cached && cached.size === f.size) {
+      parts.set(f.path, cached);
+      fromCache++;
+    } else {
+      const b = await rangeFetch(fileId, dataStart + f.offset, dataStart + f.offset + f.size, (got, want) => {
+        $('r-status').textContent = `asset ${done + 1}/${manifest.files.length}: ${f.path} — ${Math.floor(got / want * 100)}%`;
+      });
+      const digest = await crypto.subtle.digest('SHA-256', await b.arrayBuffer());
+      const hex = [...new Uint8Array(digest)].map(x => x.toString(16).padStart(2, '0')).join('');
+      if (hex !== f.sha256) throw new Error(`integrity check FAILED for "${f.path}"`);
+      await assetPut(f.sha256, b).catch(() => {});
+      parts.set(f.path, b);
+      fetched++;
+    }
+    done++;
+    $('r-pct').textContent = Math.floor(done / manifest.files.length * 100);
+    $('r-progress').value = done / manifest.files.length;
+  }
+  log(`Site assets: ${fetched} fetched from peers, ${fromCache} served from local dedupe cache (${fromCache ? 'no re-download for unchanged files' : 'first visit'}).`);
+  conn.send({ type: 'ack', message: `received "${info.fileName}" via ranges (${fetched} fetched, ${fromCache} cached) OK` });
+
+  // Reassemble the canonical bundle (blob composition references parts on disk,
+  // no big RAM copy) so seeding and the cache layer stay format-compatible.
+  const pieces = [await head.slice(0, dataStart).arrayBuffer()];
+  for (const f of manifest.files) pieces.push(parts.get(f.path));
+  return { name: info.fileName, mime: 'application/octet-stream', blob: new Blob(pieces), pwHash };
 }
 
 // ── site bundles (Stage 9B): hash-verified P2P-hosted static sites ─────────
@@ -673,6 +809,18 @@ async function startReceive(fileId) {
     pathOf(conn).then(p => { const e = livePeers.get(key); if (e) { e.path = p; renderPeers(); } });
     $('r-status').textContent = `downloading from seeder (slot ${n})…`;
     try {
+      if (!info.unknown && info.kind === 'site') {
+        try {
+          const entry = await fetchSiteProgressive(conn, fileId, info, pwHash);
+          conn.close(); peer.destroy();
+          livePeers.delete(key); renderPeers();
+          await completeReceive(fileId, entry, pwHash, `⚡ live P2P mesh (slot ${n}, per-asset ranges + dedupe cache)`);
+          return;
+        } catch (e) {
+          if (String(e.message).includes('password')) throw e;
+          log(`Progressive site fetch failed (${e.message}) — falling back to classic transfer.`, true);
+        }
+      }
       const entry = await receiveFile(conn, fileId, pwHash, inc => {
         $('r-name').textContent = inc.name;
         $('r-size').textContent = fmtBytes(inc.size);

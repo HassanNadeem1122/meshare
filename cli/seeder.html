@@ -129,6 +129,29 @@ async function pathOf(conn) {
   } catch { return '…'; }
 }
 
+// S3: serve an arbitrary byte range so recipients can fetch manifest-first
+// and per-asset instead of the whole bundle. Additive; classic path untouched.
+async function serveRange(conn, key, req) {
+  if (meta.pwHash && req.pw !== meta.pwHash) {
+    conn.send({ type: 'error', message: 'password required or incorrect' });
+    return log(`Refused range request from ${conn.peer} — wrong or missing password.`, true);
+  }
+  const from = Math.max(0, Number(req.from) || 0);
+  const to = Math.min(blob.size, Number(req.to) || 0);
+  if (to <= from) return conn.send({ type: 'error', message: 'bad range' });
+  conn.send({ type: 'range-meta', reqId: req.reqId, from, to, total: blob.size });
+  const CS = MESHARE.chunkSize;
+  for (let off = from; off < to; off += CS) {
+    if (!conn.open) return;
+    const buf = await blob.slice(off, Math.min(off + CS, to)).arrayBuffer();
+    conn.send(new Uint8Array(buf));
+    const p = livePeers.get(key); if (p) p.bytes += buf.byteLength;
+    while (conn.open && conn.dataChannel && conn.dataChannel.bufferedAmount > MESHARE.maxBufferedBytes) await sleep(50);
+  }
+  if (conn.open) conn.send({ type: 'range-done', reqId: req.reqId });
+  renderPeers();
+}
+
 async function serveFile(conn, key, pw) {
   if (meta.pwHash && pw !== meta.pwHash) {
     conn.send({ type: 'error', message: 'password required or incorrect' });
@@ -198,6 +221,7 @@ function claimSlot(fileId, n = 0) {
       });
       conn.on('data', d => {
         if (d && d.type === 'request') serveFile(conn, key, d.pw);
+        else if (d && d.type === 'request-range') serveRange(conn, key, d);
         else if (d && d.type === 'ack') log(`${conn.peer} confirmed: ${d.message}`);
       });
       conn.on('close', () => {
