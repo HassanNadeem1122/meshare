@@ -22,8 +22,58 @@ const RED = s => `\x1b[91m${s}\x1b[0m`;
 function usage(code) {
   console.error(`usage: meshare <file> [--name custom-name] [--expires days] [--password secret]
                [--no-backup] [--no-open] [--port N]
+       meshare site <folder> [same flags]   host a small static site P2P
        meshare revoke <fileId>`);
   process.exit(code);
+}
+
+// Site bundle format: "MSHARE1\n" + uint32LE manifest length + manifest JSON
+// + concatenated file bytes. Every file is SHA-256 hashed so recipients can
+// verify integrity before executing anything.
+const SITE_MAX_BYTES = 20 * 1024 * 1024;
+const SITE_MAX_FILES = 500;
+
+function buildSiteBundle(folderAbs) {
+  const files = [];
+  (function walk(dir, rel) {
+    for (const d of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (d.name.startsWith('.') || d.name === 'node_modules') continue;
+      const full = path.join(dir, d.name);
+      const relPath = rel ? `${rel}/${d.name}` : d.name;
+      if (d.isDirectory()) walk(full, relPath);
+      else if (d.isFile()) files.push({ full, rel: relPath });
+    }
+  })(folderAbs, '');
+  if (!files.length) { console.error(RED('meshare: folder contains no files')); process.exit(1); }
+  if (files.length > SITE_MAX_FILES) { console.error(RED(`meshare: too many files (${files.length} > ${SITE_MAX_FILES})`)); process.exit(1); }
+  const entry = files.some(f => f.rel === 'index.html') ? 'index.html'
+    : (files.find(f => f.rel.endsWith('.html')) || {}).rel;
+  if (!entry) { console.error(RED('meshare: no .html entry file found in folder')); process.exit(1); }
+  let offset = 0;
+  const manifestFiles = [];
+  const datas = [];
+  for (const f of files) {
+    const buf = fs.readFileSync(f.full);
+    manifestFiles.push({
+      path: f.rel,
+      size: buf.length,
+      offset,
+      sha256: crypto.createHash('sha256').update(buf).digest('hex')
+    });
+    datas.push(buf);
+    offset += buf.length;
+    if (offset > SITE_MAX_BYTES) {
+      console.error(RED(`meshare: site exceeds ${SITE_MAX_BYTES / 1048576} MB — keep bundles small (this is v1; chunk-lazy loading is on the roadmap)`));
+      process.exit(1);
+    }
+  }
+  const manifest = Buffer.from(JSON.stringify({ kind: 'site', v: 1, entry, files: manifestFiles }));
+  const lenBuf = Buffer.alloc(4);
+  lenBuf.writeUInt32LE(manifest.length);
+  const bundle = Buffer.concat([Buffer.from('MSHARE1\n'), lenBuf, manifest, ...datas]);
+  const tmp = path.join(os.tmpdir(), `meshare-site-${Date.now()}.mshare`);
+  fs.writeFileSync(tmp, bundle);
+  return { tmp, fileCount: files.length, totalBytes: bundle.length, entry, siteName: path.basename(folderAbs) };
 }
 
 // ── arg parsing ─────────────────────────────────────────────────────────────
@@ -67,15 +117,27 @@ if (positional[0] === 'revoke') {
   return;
 }
 
-// ── share command ───────────────────────────────────────────────────────────
-const filePath = positional[0];
+// ── share command (file or site bundle) ─────────────────────────────────────
+let filePath = positional[0];
+let siteInfo = null;
+if (positional[0] === 'site') {
+  const folder = positional[1];
+  if (!folder) usage(1);
+  const folderAbs = path.resolve(folder);
+  let fstat;
+  try { fstat = fs.statSync(folderAbs); } catch { console.error(RED(`meshare: folder not found: ${folderAbs}`)); process.exit(1); }
+  if (!fstat.isDirectory()) { console.error(RED(`meshare: not a folder: ${folderAbs}`)); process.exit(1); }
+  siteInfo = buildSiteBundle(folderAbs);
+  filePath = siteInfo.tmp;
+  console.log(DIM(`  site bundle: ${siteInfo.fileCount} files, ${(siteInfo.totalBytes / 1048576).toFixed(2)} MB, entry ${siteInfo.entry} — hash-verified on arrival`));
+}
 if (!filePath) usage(1);
 const absPath = path.resolve(filePath);
 let stat;
 try { stat = fs.statSync(absPath); } catch { console.error(RED(`meshare: file not found: ${absPath}`)); process.exit(1); }
 if (!stat.isFile()) { console.error(RED(`meshare: not a file: ${absPath}`)); process.exit(1); }
 
-const fileName = path.basename(absPath);
+const fileName = siteInfo ? `${siteInfo.siteName}.mshare` : path.basename(absPath);
 const pwHash = flags.password ? crypto.createHash('sha256').update(String(flags.password)).digest('hex') : null;
 
 async function registerShare() {
@@ -83,6 +145,7 @@ async function registerShare() {
     fileName,
     size: stat.size,
     mime: 'application/octet-stream',
+    kind: siteInfo ? 'site' : 'file',
     expiresDays: flags.expires !== undefined ? Number(flags.expires) : 7,
     passwordHash: pwHash || undefined
   };

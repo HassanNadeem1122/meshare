@@ -88,6 +88,17 @@
     </div>
   </section>
 
+  <section id="site-view" hidden>
+    <div class="card" style="padding:12px">
+      <div class="status-line" style="margin:2px 6px 10px">
+        <span class="dot on"></span><span id="site-label"></span>
+        <span style="margin-left:auto;color:var(--muted);font-size:12px">sandboxed — no access to your data</span>
+      </div>
+      <iframe id="site-frame" sandbox="allow-scripts allow-forms allow-pointer-lock"
+              style="width:100%;height:70vh;border:0;border-radius:12px;background:#fff"></iframe>
+    </div>
+  </section>
+
   <section id="library-view" hidden>
     <div class="card">
       <div class="stripe"></div>
@@ -535,6 +546,83 @@ async function completeReceive(fileId, entry, pwHash, sourceLabel) {
     log(`Now seeding "${entry.name}" as slot ${slot} — this tab serves new peers even if the sender leaves.`);
   } catch (e) { log(`Could not register as seeder: ${e.message}`, true); }
   renderLibrary();
+  maybeOfferSite(fileId, entry);
+}
+
+// ── site bundles (Stage 9B): hash-verified P2P-hosted static sites ─────────
+
+const SITE_MAGIC = 'MSHARE1\n';
+
+async function maybeOfferSite(fileId, entry) {
+  try {
+    if (entry.blob.size < 12 || await entry.blob.slice(0, 8).text() !== SITE_MAGIC) return;
+  } catch { return; }
+  if ($('open-site-btn')) $('open-site-btn').remove();
+  const btn = document.createElement('button');
+  btn.id = 'open-site-btn';
+  btn.className = 'btn';
+  btn.textContent = 'Open site';
+  btn.style.marginLeft = '10px';
+  btn.onclick = () => renderSite(entry).catch(e => log(`Site render failed: ${e.message || e}`, true));
+  $('save-btn').after(btn);
+  log('This share is a meshare site bundle — click "Open site" to run it (sandboxed, hash-verified first).');
+}
+
+async function renderSite(entry) {
+  const blob = entry.blob;
+  const mLen = new DataView(await blob.slice(8, 12).arrayBuffer()).getUint32(0, true);
+  const manifest = JSON.parse(await blob.slice(12, 12 + mLen).text());
+  const dataStart = 12 + mLen;
+
+  const parts = new Map();
+  for (const f of manifest.files) {
+    const b = blob.slice(dataStart + f.offset, dataStart + f.offset + f.size);
+    const digest = await crypto.subtle.digest('SHA-256', await b.arrayBuffer());
+    const hex = [...new Uint8Array(digest)].map(x => x.toString(16).padStart(2, '0')).join('');
+    if (hex !== f.sha256) throw new Error(`integrity check FAILED for "${f.path}" — refusing to run tampered content`);
+    parts.set(f.path, b);
+  }
+  log(`Site integrity verified: ${manifest.files.length} file${manifest.files.length === 1 ? '' : 's'}, all SHA-256 hashes match.`);
+
+  const mimeOf = p =>
+    p.endsWith('.html') ? 'text/html' : p.endsWith('.css') ? 'text/css'
+    : p.endsWith('.js') ? 'text/javascript' : p.endsWith('.png') ? 'image/png'
+    : p.endsWith('.jpg') || p.endsWith('.jpeg') ? 'image/jpeg' : p.endsWith('.svg') ? 'image/svg+xml'
+    : p.endsWith('.gif') ? 'image/gif' : p.endsWith('.webp') ? 'image/webp'
+    : p.endsWith('.json') ? 'application/json' : p.endsWith('.mp3') ? 'audio/mpeg'
+    : p.endsWith('.wav') ? 'audio/wav' : 'application/octet-stream';
+  const toDataUrl = (b, mime) => new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result.replace(/^data:[^;,]*/, `data:${mime}`));
+    r.onerror = () => rej(r.error);
+    r.readAsDataURL(b);
+  });
+
+  // Everything becomes a data: URL because the sandboxed (opaque-origin)
+  // iframe cannot read our origin's blob: URLs. Order matters: binary assets
+  // first, then css/js with asset paths substituted, then the entry html.
+  const urls = new Map();
+  const isText = p => /\.(css|js|html?)$/i.test(p);
+  for (const f of manifest.files) {
+    if (!isText(f.path)) urls.set(f.path, await toDataUrl(parts.get(f.path), mimeOf(f.path)));
+  }
+  const substitute = text => {
+    for (const [p, u] of urls) text = text.split(p).join(u);
+    return text;
+  };
+  for (const f of manifest.files) {
+    if (isText(f.path) && f.path !== manifest.entry) {
+      const text = substitute(await parts.get(f.path).text());
+      urls.set(f.path, await toDataUrl(new Blob([text]), mimeOf(f.path)));
+    }
+  }
+  const html = substitute(await parts.get(manifest.entry).text());
+
+  $('site-frame').srcdoc = html;
+  $('site-label').textContent = `running "${manifest.entry}" from the mesh — ${manifest.files.length} files, hash-verified`;
+  $('site-view').hidden = false;
+  $('site-view').scrollIntoView({ behavior: 'smooth' });
+  log('Site is running locally in a sandboxed frame. You are seeding it to the next visitor.');
 }
 
 // ── receive flow (link recipient) ──────────────────────────────────────────
@@ -743,6 +831,7 @@ const fileId = location.hash.slice(1).trim().toLowerCase();
     save.download = entry.name;
     save.hidden = false;
     log(`File ${fileId} ("${entry.name}") already cached on this device — served instantly, re-seeding.`);
+    maybeOfferSite(fileId, entry);
   } else if (fileId) {
     startReceive(fileId);
   } else {

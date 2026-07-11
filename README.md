@@ -36,8 +36,15 @@ meshare <file>                     share (random link, expires in 7 days)
 meshare <file> --name launch-kit   human-readable link: …/#launch-kit
 meshare <file> --expires 3         custom expiry in days
 meshare <file> --password s3cret   password-protect the share
+meshare site <folder>              host a small static site/game, P2P (same flags)
 meshare revoke <id>                kill one of your links, for everyone
 ```
+
+### P2P site hosting (new)
+
+`meshare site ./my-game` bundles a folder (≤20 MB), hashes every file, and serves it through the same mesh. Visitors click the link, the bundle arrives peer-to-peer, **every file's SHA-256 is verified before a single line runs**, and the site executes in a sandboxed frame with no access to visitor data. Every visitor seeds the site to the next one. Try the included example: `meshare site ./examples/bounce-demo`.
+
+v1 scope, honestly: single-page sites and games with directly-referenced assets (scripts, styles, images, audio) work; sites that `fetch()` their own files at runtime or use routing need the service-worker serving mode on the roadmap.
 
 No CLI? Open the [web app](https://meshare.just1hassanhere.workers.dev), pick a file, get a link — sharing works entirely in the browser too.
 
@@ -55,6 +62,7 @@ No CLI? Open the [web app](https://meshare.just1hassanhere.workers.dev), pick a 
 | Expiry / revocation | Enforced by the registry Worker; live seeders poll and stand down when a share is killed |
 | Password protection | Shared-secret gate enforced at both the mesh layer and the registry |
 | Rate limiting | Durable (cross-isolate) per-IP limits on registration, uploads, downloads, and credential minting |
+| P2P site hosting (v1) | `meshare site ./folder` — hash-verified bundles, sandboxed execution, visitors become mirrors |
 
 ## Known limitations — read before relying on it
 

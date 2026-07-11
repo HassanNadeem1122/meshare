@@ -130,6 +130,7 @@ export default {
         }
         const meta = {
           fileId: id,
+          kind: body.kind === 'site' ? 'site' : 'file',
           fileName: String(body.fileName).slice(0, 200),
           size: body.size,
           mime: String(body.mime || 'application/octet-stream').slice(0, 100),
@@ -158,6 +159,7 @@ export default {
       if (request.method === 'GET' && !sub) {
         return json({
           fileId: meta.fileId,
+          kind: meta.kind || 'file',
           fileName: meta.fileName,
           size: meta.size,
           mime: meta.mime,
