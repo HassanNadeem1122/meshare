@@ -1,0 +1,236 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>meshare — seeding</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<style>
+  :root { --bg:#0f1012; --card:#17181b; --card-2:#1d1f23; --line:#26282d; --lime:#d9f24b; --text:#f2f2f0; --muted:#8b8e94; --danger:#ff6b5e; }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; padding: 24px 16px; }
+  main { max-width: 640px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: 10px; max-width: 640px; margin: 0 auto 20px; }
+  .mark { font-weight: 800; font-size: 22px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 22px; margin-bottom: 16px; overflow: hidden; }
+  .stripe { height: 8px; margin: -22px -22px 18px; background: repeating-linear-gradient(-45deg, var(--lime) 0 10px, transparent 10px 20px); opacity: .9; }
+  .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 1.2px; margin-bottom: 8px; }
+  .file-name { font-size: 18px; font-weight: 700; word-break: break-all; }
+  .file-size { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .big-stat { font-size: 64px; font-weight: 800; letter-spacing: -2px; line-height: 1; margin: 12px 0 8px; }
+  .status-line { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 14px; color: var(--muted); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #4a4d52; flex: none; }
+  .dot.on { background: var(--lime); box-shadow: 0 0 10px rgba(217,242,75,.55); animation: pulse 1.6s ease-in-out infinite; }
+  .dot.err { background: var(--danger); }
+  @keyframes pulse { 50% { opacity: .45; } }
+  .peer-row { display: flex; align-items: center; gap: 10px; background: var(--card-2); border-radius: 12px; padding: 10px 14px; margin-top: 8px; font-size: 13px; }
+  .peer-row .meta { color: var(--muted); margin-left: auto; font-variant-numeric: tabular-nums; }
+  .empty { color: var(--muted); font-size: 13px; }
+  .link { color: var(--lime); font-family: ui-monospace, monospace; font-size: 13px; word-break: break-all; }
+  #log { background: #0a0b0c; border-radius: 12px; padding: 12px; font: 11.5px/1.6 ui-monospace, monospace; color: #9fdf9f; max-height: 30vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
+  #log .err { color: var(--danger); }
+  details { margin-top: 8px; } summary { color: var(--muted); font-size: 13px; cursor: pointer; }
+</style>
+
+<header><span class="mark">meshare</span><span class="dot on" id="head-dot"></span><span style="color:var(--muted);font-size:13px">CLI seeder</span></header>
+<main>
+  <div class="card">
+    <div class="stripe"></div>
+    <div class="label">seeding</div>
+    <div class="file-name" id="f-name">loading…</div>
+    <div class="file-size" id="f-size"></div>
+    <div class="status-line"><span class="dot" id="s-dot"></span><span id="s-status">starting…</span></div>
+    <div style="margin-top:12px" class="link" id="s-link"></div>
+  </div>
+  <div class="card">
+    <div class="label">connected peers</div>
+    <div class="big-stat" id="peer-count">0</div>
+    <div id="peer-list"><div class="empty">waiting for the first recipient…</div></div>
+  </div>
+  <details><summary>connection log</summary><div id="log"></div></details>
+</main>
+
+<script>
+window.MESHARE = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun.relay.metered.ca:80' }
+  ],
+  turnState: 'loading',
+  turnEndpoints: [
+    'https://meshare-turn.just1hassanhere.workers.dev/turn-credentials',
+    'http://localhost:8138/turn-credentials'
+  ],
+  maxSlots: 8,
+  chunkSize: 16 * 1024,
+  maxBufferedBytes: 4 * 1024 * 1024
+};
+
+const $ = id => document.getElementById(id);
+function log(msg, isError) {
+  const line = document.createElement('div');
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  if (isError) line.className = 'err';
+  $('log').appendChild(line);
+  $('log').scrollTop = $('log').scrollHeight;
+  (isError ? console.error : console.log)(`[meshare:seeder] ${msg}`);
+}
+const fmtBytes = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1024 ? (n / 1024).toFixed(0) + ' KB' : n + ' B';
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+let meta = null, blob = null, slot = null;
+let transfers = 0;
+const livePeers = new Map();
+
+function report(state, message) {
+  fetch('/_status', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ state, message: message || null, slot, peers: livePeers.size, transfers }) }).catch(() => {});
+}
+setInterval(() => { if (slot !== null) report('seeding'); }, 3000);
+
+function renderPeers() {
+  $('peer-count').textContent = livePeers.size;
+  const el = $('peer-list');
+  el.textContent = '';
+  if (!livePeers.size) el.innerHTML = '<div class="empty">waiting for the first recipient…</div>';
+  livePeers.forEach(p => {
+    const row = document.createElement('div');
+    row.className = 'peer-row';
+    row.innerHTML = `<span class="dot on"></span><code>${p.peerId.slice(0, 8)}</code><span class="meta">${p.path || '…'} · ${fmtBytes(p.bytes)}</span>`;
+    el.appendChild(row);
+  });
+}
+
+async function loadTurnCredentials() {
+  for (const url of window.MESHARE.turnEndpoints) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 5000);
+      const res = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(t);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const turn = (data.iceServers || []).filter(s => [].concat(s.urls).some(u => /^turns?:/i.test(u)));
+      if (!turn.length) throw new Error('no TURN entries');
+      window.MESHARE.iceServers = window.MESHARE.iceServers.concat(turn);
+      log(`TURN: fetched ${turn.length} relay entries from ${url}.`);
+      return;
+    } catch (e) { log(`TURN: ${url} failed (${e.message || e})`, true); }
+  }
+  log('WARNING: no TURN source — strict-NAT recipients may fail.', true);
+}
+
+async function pathOf(conn) {
+  await sleep(400);
+  try {
+    const stats = await conn.peerConnection.getStats();
+    let pair = null;
+    stats.forEach(s => { if (s.type === 'transport' && s.selectedCandidatePairId) pair = stats.get(s.selectedCandidatePairId); });
+    if (!pair) return '…';
+    const l = stats.get(pair.localCandidateId) || {}, r = stats.get(pair.remoteCandidateId) || {};
+    return (l.candidateType === 'relay' || r.candidateType === 'relay') ? 'RELAY' : 'DIRECT';
+  } catch { return '…'; }
+}
+
+async function serveFile(conn, key, pw) {
+  if (meta.pwHash && pw !== meta.pwHash) {
+    conn.send({ type: 'error', message: 'password required or incorrect' });
+    return log(`Refused ${conn.peer} — wrong or missing password.`, true);
+  }
+  const CS = MESHARE.chunkSize;
+  const chunkCount = Math.max(1, Math.ceil(blob.size / CS));
+  log(`Serving "${meta.name}" (${chunkCount} chunks) to ${conn.peer}…`);
+  conn._serving = true;
+  conn.send({ type: 'meta', name: meta.name, size: blob.size, mime: 'application/octet-stream', chunkCount });
+  for (let i = 0; i < chunkCount; i++) {
+    if (!conn.open) { conn._serving = false; return log(`Interrupted at chunk ${i + 1}/${chunkCount}.`, true); }
+    const buf = await blob.slice(i * CS, (i + 1) * CS).arrayBuffer();
+    conn.send(new Uint8Array(buf));
+    const p = livePeers.get(key); if (p) { p.bytes += buf.byteLength; if (i % 64 === 0 || i === chunkCount - 1) renderPeers(); }
+    while (conn.open && conn.dataChannel && conn.dataChannel.bufferedAmount > MESHARE.maxBufferedBytes) await sleep(50);
+  }
+  if (!conn.open) { conn._serving = false; return log('Interrupted before completion.', true); }
+  conn.send({ type: 'done' });
+  conn._serving = false;
+  transfers++;
+  log(`Finished serving ${conn.peer} (${transfers} total).`);
+  report('seeding');
+}
+
+function claimSlot(fileId, n = 0) {
+  return new Promise((resolve, reject) => {
+    if (n >= MESHARE.maxSlots) return reject(new Error('all seeder slots taken'));
+    const p = new Peer(`meshare-${fileId}-${n}`, { debug: 1, config: { iceServers: MESHARE.iceServers } });
+    p.on('open', () => resolve({ peer: p, slot: n }));
+    p.on('error', err => {
+      if (err.type === 'unavailable-id') { p.destroy(); claimSlot(fileId, n + 1).then(resolve, reject); }
+      else if (!p.open) { p.destroy(); reject(new Error(`${err.type}: ${err.message || err}`)); }
+      else log(`Peer error (${err.type}): ${err.message || err}`, true);
+    });
+  });
+}
+
+(async () => {
+  try {
+    report('loading file');
+    meta = await (await fetch('/_meta')).json();
+    $('f-name').textContent = meta.name;
+    $('f-size').textContent = fmtBytes(meta.size) + ' · file ID ' + meta.fileId;
+    $('s-link').textContent = meta.link;
+    $('s-status').textContent = 'reading file…';
+    blob = await (await fetch('/_file')).blob();
+    log(`File loaded: "${meta.name}" (${blob.size} bytes).`);
+    report('connecting');
+    $('s-status').textContent = 'fetching relay credentials…';
+    await loadTurnCredentials();
+    $('s-status').textContent = 'registering as seeder…';
+    const claimed = await claimSlot(meta.fileId);
+    slot = claimed.slot;
+    $('s-dot').className = 'dot on';
+    $('s-status').textContent = `seeding as slot ${slot} — keep this tab open`;
+    log(`Registered as seeder slot ${slot} for ${meta.fileId}.`);
+    report('seeding');
+    claimed.peer.on('connection', conn => {
+      const key = 'in-' + conn.peer;
+      log(`Incoming connection from ${conn.peer}.`);
+      conn.on('open', async () => {
+        livePeers.set(key, { peerId: conn.peer, bytes: 0, path: null });
+        renderPeers(); report('seeding');
+        livePeers.get(key).path = await pathOf(conn);
+        renderPeers();
+      });
+      conn.on('data', d => {
+        if (d && d.type === 'request') serveFile(conn, key, d.pw);
+        else if (d && d.type === 'ack') log(`${conn.peer} confirmed: ${d.message}`);
+      });
+      conn.on('close', () => {
+        if (conn._serving) log(`Transfer interrupted: ${conn.peer} left mid-download.`, true);
+        livePeers.delete(key); renderPeers(); report('seeding');
+      });
+      conn.on('error', e => log(`Connection error: ${e.message || e}`, true));
+    });
+    claimed.peer.on('disconnected', () => {
+      if (!claimed.peer.destroyed) { log('Signaling lost — reconnecting…', true); claimed.peer.reconnect(); }
+    });
+    if (!meta.legacy) {
+      const guard = setInterval(async () => {
+        try {
+          const res = await fetch(`${meta.apiBase}/api/shares/${meta.fileId}`);
+          if (res.status === 404) return clearInterval(guard);
+          const info = await res.json();
+          if (info.status !== 'active') {
+            clearInterval(guard);
+            claimed.peer.destroy();
+            $('s-dot').className = 'dot err';
+            $('s-status').textContent = `share ${info.status} — seeding stopped`;
+            log(`This share is now ${info.status} — seeder shut down.`, true);
+            report(info.status);
+          }
+        } catch {}
+      }, 180000);
+    }
+  } catch (e) {
+    $('s-dot').className = 'dot err';
+    $('s-status').textContent = `error: ${e.message || e}`;
+    log(`FATAL: ${e.message || e}`, true);
+    report('error', String(e.message || e));
+  }
+})();
+</script>

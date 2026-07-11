@@ -1,0 +1,391 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>meshare — mesh node</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+  code { background: #eee; padding: 2px 6px; border-radius: 4px; }
+  #file-id-out { font-size: 1.2rem; user-select: all; }
+  #status { font-weight: 600; margin: 1rem 0; }
+  #status.error { color: #c0392b; }
+  #status.ok { color: #1e8449; }
+  fieldset { border: 1px solid #ccc; border-radius: 6px; margin: 1rem 0; }
+  input[type=text] { width: 100%; box-sizing: border-box; font: inherit; padding: .4rem; }
+  button { font: inherit; padding: .4rem 1rem; }
+  #seeding-list { background: #eef7ee; border-radius: 6px; padding: .5rem .75rem; }
+  #seeding-list:empty { display: none; }
+  #log { background: #111; color: #9fdf9f; padding: .75rem; border-radius: 6px; font-size: .8rem; max-height: 40vh; overflow-y: auto; white-space: pre-wrap; }
+  #log .err { color: #ff7b6b; }
+  progress { width: 100%; }
+</style>
+
+<h1>meshare · mesh node</h1>
+<p>Every node that finishes downloading a file automatically becomes a seeder for it.</p>
+
+<fieldset>
+  <legend>Share a file</legend>
+  <p><input type="file" id="share-file">
+     <button id="share-btn">Share</button></p>
+  <p id="share-result" hidden>File ID: <code id="file-id-out"></code>
+     <button id="copy-file-id">copy</button> — give this ID to anyone; they can fetch from any online seeder.</p>
+</fieldset>
+
+<fieldset>
+  <legend>Get a file</legend>
+  <p><input type="text" id="file-id-in" placeholder="paste a File ID" autocomplete="off"></p>
+  <p><label><input type="checkbox" id="force-relay"> Force TURN relay (simulates a strict-NAT network)</label></p>
+  <p><button id="fetch-btn">Fetch</button></p>
+  <progress id="progress" value="0" max="1" hidden></progress>
+  <p><a id="download" download hidden>Save received file</a></p>
+</fieldset>
+
+<div id="seeding-list"></div>
+<div id="status">Idle — share a file or paste a File ID.</div>
+<h3>Log</h3>
+<div id="log"></div>
+
+<script>
+// ===== meshare config (Stage 4: TURN credentials fetched at runtime) =========
+// No credentials are hardcoded here. They come from the meshare-auth credential
+// server, which keeps the Metered.ca secret key server-side.
+window.MESHARE = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun.relay.metered.ca:80' }
+  ],
+  turnState: 'loading',
+  turnEndpoints: [
+    'https://meshare-turn.just1hassanhere.workers.dev/turn-credentials',
+    `http://${location.hostname || 'localhost'}:8138/turn-credentials`
+  ],
+  maxSlots: 8,
+  probeTimeoutMs: 8000,
+  chunkSize: 16 * 1024,
+  maxBufferedBytes: 4 * 1024 * 1024
+};
+// ==============================================================================
+
+const $ = id => document.getElementById(id);
+
+function log(msg, isError) {
+  const line = document.createElement('div');
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  if (isError) line.className = 'err';
+  $('log').appendChild(line);
+  $('log').scrollTop = $('log').scrollHeight;
+  (isError ? console.error : console.log)(`[meshare:mesh] ${msg}`);
+}
+
+function setStatus(msg, cls) {
+  $('status').textContent = msg;
+  $('status').className = cls || '';
+}
+
+function fail(msg) {
+  log(`ERROR: ${msg}`, true);
+  setStatus(msg, 'error');
+}
+
+const store = new Map();       // fileId -> { name, mime, bytes: Uint8Array }
+const seederPeers = new Map(); // fileId -> { peer, slot }
+
+async function loadTurnCredentials() {
+  for (const url of window.MESHARE.turnEndpoints) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 5000);
+      const res = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(t);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const turn = (data.iceServers || []).filter(s => [].concat(s.urls).some(u => /^turns?:/i.test(u)));
+      if (!turn.length) throw new Error('no TURN entries in response');
+      window.MESHARE.iceServers = window.MESHARE.iceServers.concat(turn);
+      window.MESHARE.turnState = 'ready';
+      log(`TURN: fetched ${turn.length} relay entries from ${url} (mode: ${data.mode}${data.expiresInSeconds ? `, expires in ~${Math.round(data.expiresInSeconds / 60)} min` : ''}). No credentials are hardcoded in this page.`);
+      return;
+    } catch (e) {
+      log(`TURN: ${url} failed (${e.message || e}) — trying next source…`, true);
+    }
+  }
+  window.MESHARE.turnState = 'unavailable';
+  log('WARNING: no TURN credential source reachable. Continuing with STUN only — direct connections still work, but strict-NAT relay fallback is DISABLED.', true);
+}
+const turnLoaded = loadTurnCredentials();
+
+function newFileId() {
+  const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';
+  return Array.from(crypto.getRandomValues(new Uint8Array(8)), b => alphabet[b % alphabet.length]).join('');
+}
+
+function slotName(fileId, n) { return `meshare-${fileId}-${n}`; }
+
+function peerOptions(forceRelay) {
+  const config = { iceServers: MESHARE.iceServers };
+  if (forceRelay) config.iceTransportPolicy = 'relay';
+  return { debug: 2, config };
+}
+
+async function logPath(conn, label) {
+  await new Promise(r => setTimeout(r, 300));
+  try {
+    const pc = conn.peerConnection;
+    if (!pc) return log(`${label}: connection was torn down before its path could be read.`);
+    const stats = await pc.getStats();
+    let pair = null;
+    stats.forEach(s => {
+      if (s.type === 'transport' && s.selectedCandidatePairId) pair = stats.get(s.selectedCandidatePairId);
+    });
+    if (!pair) stats.forEach(s => {
+      if (!pair && s.type === 'candidate-pair' && s.state === 'succeeded' && s.nominated) pair = s;
+    });
+    if (!pair) return log(`${label}: connection path not determinable yet.`);
+    const local = stats.get(pair.localCandidateId), remote = stats.get(pair.remoteCandidateId);
+    const relayed = local.candidateType === 'relay' || remote.candidateType === 'relay';
+    log(`${label} — Connection path: ${relayed ? '🔁 TURN RELAY' : '⚡ DIRECT P2P'} — local candidate "${local.candidateType}"${local.relayProtocol ? ` (relay protocol: ${local.relayProtocol})` : ''}, remote candidate "${remote.candidateType}".`);
+  } catch (e) {
+    log(`${label}: could not read connection stats: ${e.message || e}`);
+  }
+}
+
+function updateSeedingList() {
+  const el = $('seeding-list');
+  el.textContent = '';
+  seederPeers.forEach(({ slot }, fileId) => {
+    const entry = store.get(fileId);
+    const line = document.createElement('div');
+    line.textContent = `🌱 Seeding "${entry.name}" (${entry.bytes.byteLength} bytes) — file ID ${fileId}, slot ${slot}`;
+    el.appendChild(line);
+  });
+}
+
+// Registering as a seeder = claiming the lowest free deterministic peer ID
+// ("meshare-<fileId>-<n>") on the PeerJS signaling server. The server rejecting
+// an ID as taken is what tells us another seeder already holds that slot.
+function claimSeederSlot(fileId, startAt = 0) {
+  return new Promise((resolve, reject) => {
+    const tryNext = n => {
+      if (n >= MESHARE.maxSlots) return reject(new Error(`all ${MESHARE.maxSlots} seeder slots for ${fileId} are taken`));
+      const id = slotName(fileId, n);
+      const p = new Peer(id, peerOptions(false));
+      p.on('open', () => {
+        p.on('connection', conn => attachServeHandlers(p, conn, fileId, n));
+        seederPeers.set(fileId, { peer: p, slot: n });
+        resolve({ peer: p, slot: n });
+      });
+      p.on('error', err => {
+        if (err.type === 'unavailable-id') {
+          log(`Mesh: seeder slot ${n} (${id}) is already claimed by another peer — trying slot ${n + 1}.`);
+          p.destroy();
+          tryNext(n + 1);
+        } else if (!p.open) {
+          p.destroy();
+          reject(new Error(`could not register as seeder (${err.type}): ${err.message || err}`));
+        } else {
+          fail(`Seeder peer error (${err.type}): ${err.message || err}`);
+        }
+      });
+    };
+    tryNext(startAt);
+  });
+}
+
+function attachServeHandlers(peer, conn, fileId, slot) {
+  log(`Mesh: incoming connection from ${conn.peer} on seeder slot ${slot}.`);
+  conn.on('data', d => {
+    if (d && d.type === 'request') serveFile(conn, d.fileId, slot);
+    else if (d && d.type === 'ack') log(`Mesh: peer ${conn.peer} confirmed: ${d.message}`);
+  });
+  conn.on('close', () => {
+    if (conn._meshareServing) fail(`Transfer interrupted: peer ${conn.peer} disconnected mid-download.`);
+    else log(`Mesh: peer ${conn.peer} disconnected.`);
+  });
+  conn.on('error', err => fail(`Serve connection error: ${err.message || err}`));
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function serveFile(conn, fileId, slot) {
+  const entry = store.get(fileId);
+  if (!entry) {
+    conn.send({ type: 'error', message: `this seeder has no file "${fileId}"` });
+    return fail(`Mesh: peer ${conn.peer} requested file "${fileId}" which this node does not hold.`);
+  }
+  logPath(conn, `Mesh: serving to ${conn.peer}`);
+  const { name, mime, bytes } = entry;
+  const chunkCount = Math.max(1, Math.ceil(bytes.byteLength / MESHARE.chunkSize));
+  log(`Mesh: serving "${name}" (${bytes.byteLength} bytes, ${chunkCount} chunks) from slot ${slot} to peer ${conn.peer}…`);
+  conn._meshareServing = true;
+  conn.send({ type: 'meta', name, size: bytes.byteLength, mime, chunkCount });
+  for (let i = 0; i < chunkCount; i++) {
+    if (!conn.open) { conn._meshareServing = false; return fail(`Transfer interrupted at chunk ${i + 1}/${chunkCount} while serving ${conn.peer}.`); }
+    conn.send(bytes.subarray(i * MESHARE.chunkSize, (i + 1) * MESHARE.chunkSize));
+    while (conn.open && conn.dataChannel && conn.dataChannel.bufferedAmount > MESHARE.maxBufferedBytes) await sleep(50);
+  }
+  if (!conn.open) { conn._meshareServing = false; return fail(`Transfer interrupted while serving ${conn.peer}: connection closed before completion.`); }
+  conn.send({ type: 'done' });
+  conn._meshareServing = false;
+  log(`Mesh: finished serving "${name}" to ${conn.peer}.`);
+}
+
+function probeSlot(peer, targetId) {
+  return new Promise((resolve, reject) => {
+    const conn = peer.connect(targetId, { reliable: true });
+    const timer = setTimeout(() => {
+      cleanup();
+      conn.close();
+      reject(new Error(`unreachable — no data channel after ${MESHARE.probeTimeoutMs / 1000}s`));
+    }, MESHARE.probeTimeoutMs);
+    const onErr = err => {
+      if (err.type === 'peer-unavailable' && String(err.message).includes(targetId)) {
+        cleanup();
+        reject(new Error('no seeder registered at this slot'));
+      }
+    };
+    const cleanup = () => { clearTimeout(timer); peer.off('error', onErr); };
+    peer.on('error', onErr);
+    conn.on('open', () => { cleanup(); resolve(conn); });
+  });
+}
+
+function receiveFile(conn, fileId) {
+  return new Promise((resolve, reject) => {
+    let incoming = null;
+    conn.send({ type: 'request', fileId });
+    conn.on('data', async data => {
+      try {
+        if (data && data.type === 'error') return reject(new Error(`seeder refused: ${data.message}`));
+        if (data && data.type === 'meta') {
+          incoming = { name: data.name, size: data.size, mime: data.mime, chunks: [], received: 0 };
+          log(`Mesh: downloading "${data.name}" (${data.size} bytes, ${data.chunkCount} chunks)…`);
+          $('progress').hidden = false;
+          $('progress').value = 0;
+          return;
+        }
+        if (data && data.type === 'done') {
+          if (!incoming) return reject(new Error('protocol error: "done" before metadata'));
+          if (incoming.received !== incoming.size) return reject(new Error(`size mismatch: expected ${incoming.size} bytes, got ${incoming.received}`));
+          const bytes = new Uint8Array(incoming.size);
+          let off = 0;
+          for (const c of incoming.chunks) { bytes.set(c, off); off += c.byteLength; }
+          conn.send({ type: 'ack', message: `received "${incoming.name}" (${incoming.size} bytes) OK` });
+          incoming.complete = true;
+          return resolve({ name: incoming.name, mime: incoming.mime, bytes });
+        }
+        let buf = data;
+        if (buf instanceof Blob) buf = await buf.arrayBuffer();
+        if (buf instanceof ArrayBuffer || ArrayBuffer.isView(buf)) {
+          if (!incoming) return reject(new Error('protocol error: data chunk before metadata'));
+          const view = buf instanceof ArrayBuffer ? new Uint8Array(buf) : new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+          incoming.chunks.push(view);
+          incoming.received += view.byteLength;
+          $('progress').value = incoming.received / incoming.size;
+        }
+      } catch (e) { reject(e); }
+    });
+    conn.on('close', () => {
+      if (incoming && !incoming.complete) reject(new Error(`transfer interrupted: connection closed after ${incoming.received} of ${incoming.size} bytes`));
+      else if (!incoming) reject(new Error('connection closed before the seeder sent anything'));
+    });
+    conn.on('error', err => reject(new Error(`connection error: ${err.message || err}`)));
+  });
+}
+
+async function fetchFile(fileId, forceRelay) {
+  if (store.has(fileId)) return fail(`This node already holds file ${fileId} (and is seeding it).`);
+  setStatus(`Looking for seeders of ${fileId}…`);
+  log(`Mesh: fetching file ${fileId}${forceRelay ? ' (TURN relay forced)' : ''} — probing up to ${MESHARE.maxSlots} seeder slots…`);
+  const peer = new Peer(peerOptions(forceRelay));
+  await new Promise((resolve, reject) => {
+    peer.on('open', resolve);
+    peer.on('error', err => { if (!peer.open) reject(new Error(`signaling failed (${err.type}): ${err.message || err}`)); });
+  });
+  log(`Mesh: signaling connected as ${peer.id}.`);
+  for (let n = 0; n < MESHARE.maxSlots; n++) {
+    const sid = slotName(fileId, n);
+    log(`Mesh: probing seeder slot ${n} (${sid})…`);
+    let conn;
+    try {
+      conn = await probeSlot(peer, sid);
+    } catch (e) {
+      log(`Mesh: slot ${n}: ${e.message} — trying next slot.`);
+      continue;
+    }
+    log(`Mesh: seeder found at slot ${n} — requesting file.`);
+    const pathLogged = logPath(conn, 'Mesh: download');
+    try {
+      const entry = await receiveFile(conn, fileId);
+      await pathLogged;
+      conn.close();
+      peer.destroy();
+      store.set(fileId, entry);
+      const link = $('download');
+      link.href = URL.createObjectURL(new Blob([entry.bytes], { type: entry.mime || 'application/octet-stream' }));
+      link.download = entry.name;
+      link.textContent = `Save "${entry.name}" (${entry.bytes.byteLength} bytes)`;
+      link.hidden = false;
+      log(`Mesh: download complete and verified — "${entry.name}", ${entry.bytes.byteLength} bytes, from seeder slot ${n}.`);
+      setStatus(`Received "${entry.name}" from seeder slot ${n}.`, 'ok');
+      try {
+        const { slot } = await claimSeederSlot(fileId);
+        log(`Mesh: this node is now seeding "${entry.name}" as slot ${slot} — new peers can fetch from here even if the original sender goes offline.`);
+        updateSeedingList();
+      } catch (e) {
+        log(`Mesh: could not register as a seeder (${e.message}) — file received fine, but this node will not serve it.`, true);
+      }
+      return;
+    } catch (e) {
+      fail(`Mesh: download from slot ${n} failed: ${e.message}`);
+      log('Mesh: trying next seeder slot…');
+      try { conn.close(); } catch {}
+    }
+  }
+  peer.destroy();
+  fail(`No reachable seeders for file ${fileId} — the content is currently offline (checked all ${MESHARE.maxSlots} slots).`);
+}
+
+$('share-btn').onclick = async () => {
+  const file = $('share-file').files[0];
+  if (!file) return fail('Choose a file to share first.');
+  $('share-btn').disabled = true;
+  await turnLoaded;
+  const fileId = newFileId();
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    store.set(fileId, { name: file.name, mime: file.type, bytes });
+    log(`Mesh: sharing "${file.name}" (${bytes.byteLength} bytes) as file ID ${fileId} — registering as seeder…`);
+    setStatus('Registering as seeder…');
+    const { slot } = await claimSeederSlot(fileId);
+    $('file-id-out').textContent = fileId;
+    $('share-result').hidden = false;
+    log(`Mesh: registered as the original seeder for "${file.name}" — file ID ${fileId}, slot ${slot}.`);
+    setStatus(`Sharing "${file.name}" — file ID: ${fileId}`, 'ok');
+    updateSeedingList();
+  } catch (e) {
+    store.delete(fileId);
+    fail(`Could not share: ${e.message || e}`);
+  } finally {
+    $('share-btn').disabled = false;
+  }
+};
+
+$('copy-file-id').onclick = () => navigator.clipboard.writeText($('file-id-out').textContent);
+
+$('fetch-btn').onclick = async () => {
+  const fileId = $('file-id-in').value.trim().toLowerCase();
+  if (!fileId) return fail('Paste a File ID first.');
+  $('fetch-btn').disabled = true;
+  await turnLoaded;
+  if ($('force-relay').checked && window.MESHARE.turnState !== 'ready') {
+    $('fetch-btn').disabled = false;
+    return fail('“Force TURN relay” is on, but no TURN credentials were fetched (credential server unreachable). Start the meshare-auth server and reload.');
+  }
+  try {
+    await fetchFile(fileId, $('force-relay').checked);
+  } catch (e) {
+    fail(`Fetch failed: ${e.message || e}`);
+  } finally {
+    $('fetch-btn').disabled = false;
+  }
+};
+</script>

@@ -1,0 +1,316 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>meshare — Client B (receiver)</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+  code { background: #eee; padding: 2px 6px; border-radius: 4px; }
+  #my-id { font-size: 1.3rem; user-select: all; }
+  #status { font-weight: 600; margin: 1rem 0; }
+  #status.error { color: #c0392b; }
+  #status.ok { color: #1e8449; }
+  #received-text { white-space: pre-wrap; background: #f6f6f6; padding: .75rem; border-radius: 6px; display: none; }
+  #download { display: none; font-size: 1.1rem; }
+  #log { background: #111; color: #9fdf9f; padding: .75rem; border-radius: 6px; font-size: .8rem; max-height: 40vh; overflow-y: auto; white-space: pre-wrap; }
+  #log .err { color: #ff7b6b; }
+  progress { width: 100%; }
+</style>
+
+<h1>meshare · Client B (receiver)</h1>
+<p id="turn-status" style="font-size:.85rem;color:#666"></p>
+<p>Your peer ID (give this to the sender):</p>
+<p><code id="my-id">connecting to signaling server…</code>
+   <button id="copy-btn" hidden>copy</button></p>
+<div id="status">Waiting for signaling server…</div>
+<p id="save-choice" hidden>
+  <button id="save-stream-btn">Choose where to save (streams to disk)</button>
+  <button id="save-memory-btn">Receive into memory instead</button>
+</p>
+<progress id="progress" value="0" max="1" hidden></progress>
+<a id="download" download>Save received file</a>
+<div id="received-text"></div>
+<h3>Log</h3>
+<div id="log"></div>
+
+<script>
+// ── Stage 4 config ─────────────────────────────────────────────────────────
+// TURN credentials are NOT hardcoded here anymore. They are fetched at page
+// load from the meshare-auth credential server, which keeps the Metered.ca
+// secret key server-side and hands the browser only short-lived credentials.
+window.MESHARE = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun.relay.metered.ca:80' }
+  ],
+  turnState: 'loading',
+  turnEndpoints: [
+    'https://meshare-turn.just1hassanhere.workers.dev/turn-credentials',
+    `http://${location.hostname || 'localhost'}:8138/turn-credentials`
+  ]
+};
+// ───────────────────────────────────────────────────────────────────────────
+
+const $ = id => document.getElementById(id);
+
+function log(msg, isError) {
+  const line = document.createElement('div');
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  if (isError) line.className = 'err';
+  $('log').appendChild(line);
+  $('log').scrollTop = $('log').scrollHeight;
+  (isError ? console.error : console.log)(`[meshare:receiver] ${msg}`);
+}
+
+function setStatus(msg, cls) {
+  $('status').textContent = msg;
+  $('status').className = cls || '';
+}
+
+function fail(msg) {
+  log(`ERROR: ${msg}`, true);
+  setStatus(msg, 'error');
+}
+
+const hasTurn = () =>
+  window.MESHARE.iceServers.some(s => [].concat(s.urls).some(u => /^turns?:/i.test(u)));
+
+function showTurnStatus() {
+  $('turn-status').textContent =
+    window.MESHARE.turnState === 'loading' ? 'TURN relay: fetching short-lived credentials…'
+    : hasTurn() ? 'TURN relay: short-lived credentials fetched — strict-NAT senders can reach this peer via relay.'
+    : 'TURN relay: UNAVAILABLE (credential server unreachable) — direct P2P only; strict-NAT networks will time out.';
+}
+showTurnStatus();
+
+async function loadTurnCredentials() {
+  for (const url of window.MESHARE.turnEndpoints) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 5000);
+      const res = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(t);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const turn = (data.iceServers || []).filter(s => [].concat(s.urls).some(u => /^turns?:/i.test(u)));
+      if (!turn.length) throw new Error('no TURN entries in response');
+      window.MESHARE.iceServers = window.MESHARE.iceServers.concat(turn);
+      window.MESHARE.turnState = 'ready';
+      log(`TURN: fetched ${turn.length} relay entries from ${url} (mode: ${data.mode}${data.expiresInSeconds ? `, expires in ~${Math.round(data.expiresInSeconds / 60)} min` : ''}). No credentials are hardcoded in this page.`);
+      showTurnStatus();
+      return;
+    } catch (e) {
+      log(`TURN: ${url} failed (${e.message || e}) — trying next source…`, true);
+    }
+  }
+  window.MESHARE.turnState = 'unavailable';
+  log('WARNING: no TURN credential source reachable. Continuing with STUN only — direct connections still work, but strict-NAT relay fallback is DISABLED.', true);
+  showTurnStatus();
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function watchIce(c, tries = 30) {
+  const pc = c.peerConnection;
+  if (!pc) {
+    if (tries > 0) setTimeout(() => watchIce(c, tries - 1), 100);
+    return;
+  }
+  if (pc._meshareWatched) return;
+  pc._meshareWatched = true;
+  pc.addEventListener('iceconnectionstatechange', () => {
+    log(`ICE state: ${pc.iceConnectionState}`);
+    if (pc.iceConnectionState === 'failed') {
+      log('ICE failed: no working network path (direct or relay) to the peer.', true);
+    }
+  });
+}
+
+async function logPath(c) {
+  await sleep(1200);
+  const pc = c.peerConnection;
+  if (!pc) return log('Connection path: unknown (no RTCPeerConnection exposed).');
+  const stats = await pc.getStats();
+  let pair = null;
+  stats.forEach(s => {
+    if (s.type === 'transport' && s.selectedCandidatePairId) pair = stats.get(s.selectedCandidatePairId);
+  });
+  if (!pair) stats.forEach(s => {
+    if (!pair && s.type === 'candidate-pair' && s.state === 'succeeded' && s.nominated) pair = s;
+  });
+  if (!pair) return log('Connection path: not determined yet (no selected candidate pair).');
+  const l = stats.get(pair.localCandidateId) || {};
+  const r = stats.get(pair.remoteCandidateId) || {};
+  const viaRelay = l.candidateType === 'relay' || r.candidateType === 'relay';
+  log(`Connection path: ${viaRelay ? '🔁 TURN RELAY' : '⚡ DIRECT P2P'} — local candidate "${l.candidateType}"${l.candidateType === 'relay' ? ` (relay protocol: ${l.relayProtocol || '?'})` : ''}, remote candidate "${r.candidateType}".`);
+}
+
+let peer = null;
+setStatus('Fetching TURN credentials…');
+loadTurnCredentials().then(() => {
+
+log('Connecting to PeerJS public signaling server…');
+peer = new Peer({ debug: 2, config: { iceServers: window.MESHARE.iceServers } });
+
+peer.on('open', id => {
+  log(`Signaling connected. My peer ID: ${id}`);
+  setStatus('Ready — waiting for a sender to connect.');
+  $('my-id').textContent = id;
+  $('copy-btn').hidden = false;
+});
+
+$('copy-btn').onclick = () => navigator.clipboard.writeText($('my-id').textContent);
+
+peer.on('disconnected', () => {
+  log('WARNING: lost connection to signaling server. New senders cannot find this ID until it reconnects; an already-open transfer is unaffected.', true);
+  peer.reconnect();
+});
+
+peer.on('error', err => {
+  fail(`Peer error (${err.type || 'unknown'}): ${err.message || err}`);
+});
+
+// Incoming transfer state. Protocol (Stage 4): {type:'meta'} → receiver replies
+// {type:'ready', mode} once a save mode is chosen → binary chunks → {type:'done'}.
+// Text still arrives as a single {type:'text'} message.
+let incoming = null;
+let activeConn = null;
+
+// The save picker needs a user gesture, so meta arrival shows these buttons and
+// the sender holds its chunks until we answer with {type:'ready'}.
+$('save-stream-btn').onclick = async () => {
+  if (!incoming || !activeConn) return;
+  try {
+    const handle = await window.showSaveFilePicker({ suggestedName: incoming.name });
+    incoming.writable = await handle.createWritable();
+    incoming.mode = 'disk';
+    $('save-choice').hidden = true;
+    log(`Streaming mode: chunks will be written straight to "${handle.name}" on disk — memory stays flat no matter how large the file is.`);
+    setStatus(`Receiving "${incoming.name}" (streaming to disk)…`);
+    activeConn.send({ type: 'ready', mode: 'disk-streaming' });
+  } catch (e) {
+    if (e.name === 'AbortError') log('Save dialog dismissed — choose again (the sender is waiting, up to 120s).', true);
+    else fail(`Could not open save location: ${e.message || e}`);
+  }
+};
+
+$('save-memory-btn').onclick = () => {
+  if (!incoming || !activeConn) return;
+  incoming.mode = 'memory';
+  $('save-choice').hidden = true;
+  log('In-memory mode chosen: fine for small files; multi-GB files can crash the tab.', true);
+  setStatus(`Receiving "${incoming.name}" (in memory)…`);
+  activeConn.send({ type: 'ready', mode: 'memory' });
+};
+
+peer.on('connection', conn => {
+  log(`Peer found: incoming connection from ${conn.peer}`);
+  setStatus(`Sender ${conn.peer} is connecting…`);
+  activeConn = conn;
+  watchIce(conn);
+
+  conn.on('open', () => {
+    log('Data channel open.');
+    setStatus(`Connected to ${conn.peer} — waiting for data.`);
+    logPath(conn);
+  });
+
+  conn.on('data', async data => {
+    try {
+      if (data && data.type === 'text') {
+        log(`Received text message (${data.text.length} chars).`);
+        $('received-text').style.display = 'block';
+        $('received-text').textContent = data.text;
+        setStatus('Text received.', 'ok');
+        conn.send({ type: 'ack', message: `text received (${data.text.length} chars)` });
+        return;
+      }
+      if (data && data.type === 'meta') {
+        incoming = { name: data.name, size: data.size, mime: data.mime, chunkCount: data.chunkCount,
+                     chunks: [], received: 0, complete: false, mode: null, writable: null };
+        log(`Incoming file: "${data.name}" (${data.size} bytes, ${data.chunkCount} chunks, type "${data.mime || 'unknown'}")`);
+        $('progress').hidden = false;
+        $('progress').value = 0;
+        const fsaAvailable = 'showSaveFilePicker' in window && isSecureContext;
+        if (fsaAvailable) {
+          log('This browser supports the File System Access API — choose where to save and the file will stream straight to disk.');
+          setStatus(`"${data.name}" incoming — choose a save mode to start.`);
+          $('save-choice').hidden = false;
+        } else {
+          incoming.mode = 'memory';
+          const why = 'showSaveFilePicker' in window
+            ? 'page is not a secure context (use localhost, file://, or HTTPS)'
+            : 'browser does not support it (e.g. Firefox/Safari)';
+          log(`File System Access API unavailable — ${why}. Falling back to IN-MEMORY receive: fine for small files, multi-GB files can crash the tab.`, true);
+          setStatus(`Receiving "${data.name}" (in memory)…`);
+          conn.send({ type: 'ready', mode: 'memory' });
+        }
+        return;
+      }
+      if (data && data.type === 'done') {
+        if (!incoming) return fail('Protocol error: got "done" with no transfer in progress.');
+        if (incoming.received !== incoming.size) {
+          if (incoming.writable) { try { await incoming.writable.abort(); } catch {} }
+          return fail(`Size mismatch: sender announced ${incoming.size} bytes but ${incoming.received} arrived. ${incoming.mode === 'disk' ? 'Partial file on disk was discarded.' : ''}`);
+        }
+        if (incoming.mode === 'disk') {
+          setStatus('Finalizing file on disk…');
+          await incoming.writable.close();
+          incoming.complete = true;
+          log(`Transfer complete: "${incoming.name}", ${incoming.received}/${incoming.size} bytes streamed to disk and verified.`);
+          setStatus(`Saved "${incoming.name}" to disk (${incoming.size} bytes).`, 'ok');
+        } else {
+          incoming.complete = true;
+          const blob = new Blob(incoming.chunks, { type: incoming.mime || 'application/octet-stream' });
+          const link = $('download');
+          link.href = URL.createObjectURL(blob);
+          link.download = incoming.name;
+          link.textContent = `Save "${incoming.name}" (${incoming.size} bytes)`;
+          link.style.display = 'inline';
+          log(`Transfer complete: "${incoming.name}", ${incoming.received}/${incoming.size} bytes verified (in memory).`);
+          setStatus(`Received "${incoming.name}" — click the link to save it.`, 'ok');
+        }
+        conn.send({ type: 'ack', message: `received "${incoming.name}" (${incoming.received} bytes) OK, mode: ${incoming.mode}` });
+        return;
+      }
+      // Binary chunk. PeerJS may deliver ArrayBuffer, TypedArray, or Blob depending on browser.
+      let buf = data;
+      if (buf instanceof Blob) buf = await buf.arrayBuffer();
+      if (buf instanceof ArrayBuffer || ArrayBuffer.isView(buf)) {
+        if (!incoming) return fail('Protocol error: got a data chunk before file metadata.');
+        if (!incoming.mode) return fail('Protocol error: got a data chunk before a save mode was chosen.');
+        const bytes = buf instanceof ArrayBuffer ? new Uint8Array(buf) : new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+        if (incoming.mode === 'disk') {
+          // Not awaited per-chunk: FileSystemWritableFileStream queues writes in
+          // call order, and close() at the end waits for the whole queue.
+          incoming.writable.write(bytes).catch(e => fail(`Disk write failed: ${e.message || e}`));
+        } else {
+          incoming.chunks.push(bytes);
+        }
+        incoming.received += bytes.byteLength;
+        $('progress').value = incoming.received / incoming.size;
+        return;
+      }
+      fail(`Protocol error: unrecognized message: ${JSON.stringify(data).slice(0, 200)}`);
+    } catch (e) {
+      fail(`Failed while handling incoming data: ${e.message || e}`);
+    }
+  });
+
+  conn.on('close', () => {
+    if (incoming && !incoming.complete) {
+      if (incoming.writable) { incoming.writable.abort().catch(() => {}); }
+      fail(`Transfer interrupted: connection to ${conn.peer} closed after ${incoming.received} of ${incoming.size} bytes of "${incoming.name}".${incoming.mode === 'disk' ? ' Partial file on disk was discarded.' : ''}`);
+      $('progress').hidden = true;
+      $('save-choice').hidden = true;
+      incoming = null;
+    } else {
+      log(`Connection to ${conn.peer} closed.`);
+      setStatus('Sender disconnected. Still ready for new connections.');
+    }
+  });
+
+  conn.on('error', err => fail(`Connection error: ${err.message || err}`));
+});
+
+});
+</script>

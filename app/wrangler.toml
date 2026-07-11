@@ -1,0 +1,27 @@
+name = "meshare"
+main = "src/worker.js"
+compatibility_date = "2025-01-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[[kv_namespaces]]
+binding = "SHARES"
+id = "aa381779a1ee4736896e2a9ce8da9bbd"
+
+[vars]
+MAX_BLOB_BYTES = "2147483648"
+
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiter"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RateLimiter"]
+
+# After enabling R2 in the Cloudflare dashboard, uncomment and redeploy:
+# [[r2_buckets]]
+# binding = "BUCKET"
+# bucket_name = "meshare"

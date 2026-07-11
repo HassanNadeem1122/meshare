@@ -1,0 +1,361 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>meshare — Client A (sender)</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+  code { background: #eee; padding: 2px 6px; border-radius: 4px; }
+  #status { font-weight: 600; margin: 1rem 0; }
+  #status.error { color: #c0392b; }
+  #status.ok { color: #1e8449; }
+  #turn-status { font-size: .85rem; color: #666; }
+  fieldset { border: 1px solid #ccc; border-radius: 6px; margin: 1rem 0; }
+  input[type=text], textarea { width: 100%; box-sizing: border-box; font: inherit; padding: .4rem; }
+  textarea { min-height: 4rem; }
+  button { font: inherit; padding: .4rem 1rem; }
+  #log { background: #111; color: #9fdf9f; padding: .75rem; border-radius: 6px; font-size: .8rem; max-height: 40vh; overflow-y: auto; white-space: pre-wrap; }
+  #log .err { color: #ff7b6b; }
+  #log .warn { color: #ffd479; }
+  progress { width: 100%; }
+</style>
+
+<h1>meshare · Client A (sender)</h1>
+<p>My peer ID: <code id="my-id">connecting to signaling server…</code></p>
+<p id="turn-status"></p>
+
+<fieldset>
+  <legend>1 · Connect</legend>
+  <label>Receiver's peer ID
+    <input type="text" id="target-id" placeholder="paste Client B's ID" autocomplete="off">
+  </label>
+  <p><label><input type="checkbox" id="force-relay"> Force TURN relay (simulates a strict-NAT network)</label></p>
+  <p><button id="connect-btn" disabled>Connect</button></p>
+</fieldset>
+
+<fieldset id="send-ui" disabled>
+  <legend>2 · Send</legend>
+  <p><input type="file" id="file-input">
+     <button id="send-file-btn">Send file</button></p>
+  <p><textarea id="text-input" placeholder="…or paste text here"></textarea>
+     <button id="send-text-btn">Send text</button></p>
+</fieldset>
+
+<div id="status">Waiting for signaling server…</div>
+<progress id="progress" value="0" max="1" hidden></progress>
+<h3>Log</h3>
+<div id="log"></div>
+
+<script>
+// ── Stage 4 config ─────────────────────────────────────────────────────────
+// TURN credentials are NOT hardcoded here anymore. They are fetched at page
+// load from the meshare-auth credential server, which keeps the Metered.ca
+// secret key server-side and hands the browser only short-lived credentials.
+window.MESHARE = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun.relay.metered.ca:80' }
+  ],
+  turnState: 'loading',
+  turnEndpoints: [
+    'https://meshare-turn.just1hassanhere.workers.dev/turn-credentials',
+    `http://${location.hostname || 'localhost'}:8138/turn-credentials`
+  ],
+  directTimeoutMs: 8000,
+  relayTimeoutMs: 15000
+};
+// ───────────────────────────────────────────────────────────────────────────
+
+const CHUNK_SIZE = 16 * 1024;
+const MAX_BUFFERED_BYTES = 4 * 1024 * 1024;
+
+const $ = id => document.getElementById(id);
+
+function log(msg, level) {
+  const line = document.createElement('div');
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  if (level) line.className = level;
+  $('log').appendChild(line);
+  $('log').scrollTop = $('log').scrollHeight;
+  (level === 'err' ? console.error : level === 'warn' ? console.warn : console.log)(`[meshare:sender] ${msg}`);
+}
+
+function setStatus(msg, cls) {
+  $('status').textContent = msg;
+  $('status').className = cls || '';
+}
+
+function fail(msg) {
+  log(`ERROR: ${msg}`, 'err');
+  setStatus(msg, 'error');
+}
+
+const hasTurn = () =>
+  window.MESHARE.iceServers.some(s => [].concat(s.urls).some(u => /^turns?:/i.test(u)));
+
+function showTurnStatus() {
+  const n = window.MESHARE.iceServers.filter(s => [].concat(s.urls).some(u => /^turns?:/i.test(u))).length;
+  $('turn-status').textContent =
+    window.MESHARE.turnState === 'loading' ? 'TURN relay: fetching short-lived credentials…'
+    : hasTurn() ? `TURN relay: ${n} relay entr${n === 1 ? 'y' : 'ies'} with short-lived credentials — will fall back automatically.`
+    : 'TURN relay: UNAVAILABLE (credential server unreachable) — direct P2P only; strict-NAT networks will time out.';
+}
+showTurnStatus();
+
+async function loadTurnCredentials() {
+  for (const url of window.MESHARE.turnEndpoints) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 5000);
+      const res = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(t);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const turn = (data.iceServers || []).filter(s => [].concat(s.urls).some(u => /^turns?:/i.test(u)));
+      if (!turn.length) throw new Error('no TURN entries in response');
+      window.MESHARE.iceServers = window.MESHARE.iceServers.concat(turn);
+      window.MESHARE.turnState = 'ready';
+      log(`TURN: fetched ${turn.length} relay entries from ${url} (mode: ${data.mode}${data.expiresInSeconds ? `, expires in ~${Math.round(data.expiresInSeconds / 60)} min` : ''}). No credentials are hardcoded in this page.`);
+      showTurnStatus();
+      return;
+    } catch (e) {
+      log(`TURN: ${url} failed (${e.message || e}) — trying next source…`, 'warn');
+    }
+  }
+  window.MESHARE.turnState = 'unavailable';
+  log('WARNING: no TURN credential source reachable. Continuing with STUN only — direct connections still work, but strict-NAT relay fallback is DISABLED.', 'warn');
+  showTurnStatus();
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// ── Connection-path introspection ──────────────────────────────────────────
+
+function watchIce(c, tries = 30) {
+  const pc = c.peerConnection;
+  if (!pc) {
+    if (tries > 0) setTimeout(() => watchIce(c, tries - 1), 100);
+    return;
+  }
+  if (pc._meshareWatched) return;
+  pc._meshareWatched = true;
+  pc.addEventListener('iceconnectionstatechange', () => {
+    log(`ICE state: ${pc.iceConnectionState}`);
+    if (pc.iceConnectionState === 'failed') {
+      log('ICE failed: no working network path (direct or relay) to the peer.', 'err');
+    }
+  });
+}
+
+async function logPath(c) {
+  await sleep(1200);
+  const pc = c.peerConnection;
+  if (!pc) return log('Connection path: unknown (no RTCPeerConnection exposed).', 'warn');
+  const stats = await pc.getStats();
+  let pair = null;
+  stats.forEach(s => {
+    if (s.type === 'transport' && s.selectedCandidatePairId) pair = stats.get(s.selectedCandidatePairId);
+  });
+  if (!pair) stats.forEach(s => {
+    if (!pair && s.type === 'candidate-pair' && s.state === 'succeeded' && s.nominated) pair = s;
+  });
+  if (!pair) return log('Connection path: not determined yet (no selected candidate pair).', 'warn');
+  const l = stats.get(pair.localCandidateId) || {};
+  const r = stats.get(pair.remoteCandidateId) || {};
+  const viaRelay = l.candidateType === 'relay' || r.candidateType === 'relay';
+  log(`Connection path: ${viaRelay ? '🔁 TURN RELAY' : '⚡ DIRECT P2P'} — local candidate "${l.candidateType}"${l.candidateType === 'relay' ? ` (relay protocol: ${l.relayProtocol || '?'})` : ''}, remote candidate "${r.candidateType}".`);
+}
+
+// ── Peer lifecycle (recreated when switching between direct and relay-only) ─
+
+let peer = null;
+let peerRelayOnly = false;
+let conn = null;
+let sending = false;
+let attemptTimer = null;
+
+function createPeer(relayOnly, onReady) {
+  peerRelayOnly = relayOnly;
+  const config = { iceServers: window.MESHARE.iceServers };
+  if (relayOnly) config.iceTransportPolicy = 'relay';
+  log(`Connecting to PeerJS signaling server (${relayOnly ? 'TURN-relay-only mode' : 'direct + relay mode'})…`);
+  $('my-id').textContent = 'connecting to signaling server…';
+  const p = new Peer({ debug: 2, config });
+
+  p.on('open', id => {
+    log(`Signaling connected. My peer ID: ${id}`);
+    $('my-id').textContent = id;
+    $('connect-btn').disabled = false;
+    if (onReady) onReady();
+    else setStatus('Ready — enter the receiver’s peer ID and connect.');
+  });
+
+  p.on('disconnected', () => {
+    if (p.destroyed || p._meshareIntentionalDestroy) return;
+    log('WARNING: lost connection to signaling server. An already-open transfer is unaffected, but new connections will fail until it reconnects.', 'warn');
+    p.reconnect();
+  });
+
+  p.on('error', err => {
+    clearTimeout(attemptTimer);
+    if (err.type === 'peer-unavailable') {
+      fail(`Peer ID not found: ${(err.message || '').replace(/^Could not connect to peer\s*/i, '')} — check the ID and make sure the receiver page is still open. (Not retrying via TURN: the ID is unknown to the signaling server, so a relay won't help.)`);
+    } else if (err.type === 'network') {
+      fail('Cannot reach the PeerJS signaling server. Check your internet connection (or the public server may be down).');
+    } else {
+      fail(`Peer error (${err.type || 'unknown'}): ${err.message || err}`);
+    }
+    $('connect-btn').disabled = !p.open;
+  });
+
+  return p;
+}
+
+setStatus('Fetching TURN credentials…');
+loadTurnCredentials().then(() => { peer = createPeer(false); });
+
+// ── Connect with timeout + TURN retry ──────────────────────────────────────
+
+function attemptConnect(target, relayOnly, attemptLabel) {
+  const timeoutMs = relayOnly ? window.MESHARE.relayTimeoutMs : window.MESHARE.directTimeoutMs;
+  log(`${attemptLabel}: connecting to ${target} — ${relayOnly ? 'TURN relay candidates only' : 'all candidates (direct preferred, relay raced automatically if configured)'}; timeout ${timeoutMs / 1000}s.`);
+  setStatus(`Connecting to ${target}…`);
+  $('connect-btn').disabled = true;
+
+  conn = peer.connect(target, { reliable: true });
+  watchIce(conn);
+
+  attemptTimer = setTimeout(() => {
+    if (conn.open) return;
+    conn._abortedForRetry = true;
+    conn.close();
+    if (!relayOnly && hasTurn()) {
+      log(`No connection after ${timeoutMs / 1000}s — direct path failed. Falling back to TURN relay…`, 'warn');
+      setStatus('Direct connection failed — retrying via TURN relay…');
+      peer._meshareIntentionalDestroy = true;
+      peer.destroy();
+      peer = createPeer(true, () => attemptConnect(target, true, 'Attempt 2 (TURN relay)'));
+    } else if (!relayOnly) {
+      fail(`Connection timeout after ${timeoutMs / 1000}s and no TURN credentials were fetched, so there is no relay to fall back to. Start the meshare-auth credential server and reload this page.`);
+      $('connect-btn').disabled = false;
+    } else {
+      fail(`TURN relay attempt also failed after ${timeoutMs / 1000}s. Either the peer is offline, or the TURN credentials are wrong/expired.`);
+      $('connect-btn').disabled = false;
+    }
+  }, timeoutMs);
+
+  conn.on('open', () => {
+    clearTimeout(attemptTimer);
+    log(`Peer found, data channel open to ${target} — ready to send.`);
+    setStatus(`Connected to ${target}.`, 'ok');
+    $('send-ui').disabled = false;
+    logPath(conn);
+  });
+
+  conn.on('data', d => {
+    if (d && d.type === 'ack') log(`Receiver confirmed: ${d.message}`);
+    if (d && d.type === 'ready' && readyResolve) { readyResolve(d.mode); readyResolve = null; }
+  });
+
+  conn.on('close', () => {
+    if (conn._abortedForRetry) return;
+    clearTimeout(attemptTimer);
+    if (sending) {
+      fail('Transfer interrupted: connection closed mid-send. The receiver did NOT get the whole payload.');
+      sending = false;
+    } else {
+      log('Connection closed.');
+      setStatus('Disconnected. You can connect again.');
+    }
+    $('send-ui').disabled = true;
+    $('connect-btn').disabled = false;
+  });
+
+  conn.on('error', err => fail(`Connection error: ${err.message || err}`));
+}
+
+$('connect-btn').onclick = () => {
+  const target = $('target-id').value.trim();
+  if (!target) return fail('Enter the receiver’s peer ID first.');
+  const forceRelay = $('force-relay').checked;
+  if (forceRelay && !hasTurn()) {
+    return fail('“Force TURN relay” is on, but no TURN credentials were fetched (credential server unreachable at page load). Start the meshare-auth server and reload.');
+  }
+  const label = forceRelay ? 'Attempt 1 (TURN relay, forced)' : 'Attempt 1 (direct)';
+  if (peerRelayOnly !== forceRelay) {
+    $('connect-btn').disabled = true;
+    peer._meshareIntentionalDestroy = true;
+    peer.destroy();
+    peer = createPeer(forceRelay, () => attemptConnect(target, forceRelay, label));
+  } else {
+    attemptConnect(target, forceRelay, label);
+  }
+};
+
+// ── Sending (Stage 4: streamed from disk, never fully in memory) ───────────
+
+let readyResolve = null;
+
+async function sendFile(file) {
+  const chunkCount = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
+  log(`Sending "${file.name}" (${file.size} bytes, ${chunkCount} chunks of ≤${CHUNK_SIZE} B) — chunks are read from disk on demand, the file is never fully loaded into memory.`);
+  setStatus(`Waiting for receiver to accept "${file.name}"…`);
+  sending = true;
+  conn.send({ type: 'meta', name: file.name, size: file.size, mime: file.type, chunkCount });
+
+  log('Waiting for the receiver to choose a save mode (their save dialog may be open)…');
+  let mode;
+  try {
+    mode = await new Promise((resolve, reject) => {
+      readyResolve = resolve;
+      setTimeout(() => { readyResolve = null; reject(new Error('receiver did not confirm within 120s — they may have dismissed the save dialog')); }, 120000);
+    });
+  } catch (e) {
+    sending = false;
+    return fail(`Send aborted: ${e.message}`);
+  }
+  log(`Receiver is ready (mode: ${mode}). Streaming chunks…`);
+  setStatus(`Sending "${file.name}"…`);
+  $('progress').hidden = false;
+  $('progress').value = 0;
+
+  for (let i = 0; i < chunkCount; i++) {
+    if (!conn.open) {
+      sending = false;
+      return fail(`Transfer interrupted at chunk ${i + 1}/${chunkCount}: connection is no longer open.`);
+    }
+    // PeerJS's binary serializer accepts TypedArrays but rejects raw ArrayBuffers,
+    // so each streamed chunk is wrapped as a Uint8Array view.
+    const buf = await file.slice(i * CHUNK_SIZE, Math.min((i + 1) * CHUNK_SIZE, file.size)).arrayBuffer();
+    conn.send(new Uint8Array(buf));
+    $('progress').value = (i + 1) / chunkCount;
+    // Back-pressure: don't let the data channel's send buffer grow unbounded.
+    while (conn.open && conn.dataChannel && conn.dataChannel.bufferedAmount > MAX_BUFFERED_BYTES) {
+      await sleep(50);
+    }
+  }
+  if (!conn.open) {
+    sending = false;
+    return fail('Transfer interrupted: connection closed before the final confirmation was sent.');
+  }
+  conn.send({ type: 'done' });
+  sending = false;
+  log(`Transfer complete: all ${chunkCount} chunks handed to the data channel. Waiting for receiver's confirmation…`);
+  setStatus(`Sent "${file.name}".`, 'ok');
+}
+
+$('send-file-btn').onclick = () => {
+  const file = $('file-input').files[0];
+  if (!file) return fail('Choose a file first.');
+  if (!conn || !conn.open) return fail('Not connected.');
+  sendFile(file).catch(e => { sending = false; fail(`Send failed: ${e.message || e}`); });
+};
+
+$('send-text-btn').onclick = () => {
+  const text = $('text-input').value;
+  if (!text) return fail('Type or paste some text first.');
+  if (!conn || !conn.open) return fail('Not connected.');
+  conn.send({ type: 'text', text });
+  log(`Sent text message (${text.length} chars).`);
+  setStatus('Text sent.', 'ok');
+};
+</script>
