@@ -4,17 +4,18 @@
 
 Share a file with one command. Everyone who opens the link downloads it browser-to-browser — no account, no install, no upload to a server — and instantly becomes a seeder for the next person. The original sender can go offline; the file lives on in the swarm.
 
+![meshare — one command hosts a site or shares a file, peer-to-peer](demo.gif)
+
+> One command hosts the `bounce` game over P2P. A fresh browser (right) loads and runs it with **nothing installed**, hash-verified, while your terminal (left) shows the link, QR, and live seeding.
+
+### Quick start
+
+```bash
+npx meshare ./file          # share any file, peer-to-peer
+meshare site ./my-folder    # host a static site or game, peer-to-peer
 ```
-npx meshare ./demo.mp4
 
-  meshare · sharing demo.mp4 (48.2 MB)
-
-  link  https://meshare.just1hassanhere.workers.dev/#k3f9pw2m  (copied to clipboard)
-
-  [QR code]
-
-  14:31:07  ● seeding (slot 0) · 1 peer connected · 1 transfer completed
-```
+Send the link it prints — whoever opens it needs nothing installed, and their browser becomes a server for the next person too.
 
 ## The demo that explains everything
 
