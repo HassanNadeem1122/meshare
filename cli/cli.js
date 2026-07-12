@@ -21,7 +21,7 @@ const RED = s => `\x1b[91m${s}\x1b[0m`;
 
 function usage(code) {
   console.error(`usage: meshare <file> [--name custom-name] [--expires days] [--password secret]
-               [--no-backup] [--no-open] [--port N]
+               [--backup] [--no-open] [--port N]
        meshare site <folder> [same flags]   host a small static site P2P
        meshare revoke <fileId>`);
   process.exit(code);
@@ -167,7 +167,7 @@ async function registerShare() {
 }
 
 async function uploadBackup(fileId, ownerToken) {
-  if (flags['no-backup']) { console.log(DIM('  backup skipped (--no-backup): share is P2P-only.')); return; }
+  // R2 backup is opt-in via --backup (R2 is off by default, so the normal path stays clean).
   console.log(DIM('  ☁ uploading backup copy to R2…'));
   try {
     const res = await fetch(`${APP_URL}/api/shares/${fileId}/blob`, {
@@ -286,7 +286,7 @@ function openBrowser(url) {
     console.log(`  ${DIM('keep this running — the browser tab it opens is the seeder.')}`);
     console.log('');
     copyToClipboard(link);
-    if (reg.ownerToken) uploadBackup(fileId, reg.ownerToken);
+    if (reg.ownerToken && flags.backup) uploadBackup(fileId, reg.ownerToken);
     if (!flags['no-open']) openBrowser(seederUrl);
     else console.log(`  ${DIM(`--no-open: open ${seederUrl} yourself to start seeding.`)}`);
   });

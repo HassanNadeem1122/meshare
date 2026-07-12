@@ -89,15 +89,23 @@
     </div>
   </section>
 
+  <style>
+    #site-view { position: fixed; inset: 0; z-index: 1000; background: #fff; display: flex; flex-direction: column; }
+    #site-view[hidden] { display: none; }
+    #site-bar { flex: none; display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--bg); color: var(--text); font-size: 13px; border-bottom: 1px solid var(--line); }
+    #site-bar .brand { font-weight: 800; }
+    #site-bar #site-label { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #site-close { margin-left: auto; flex: none; background: var(--card-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 5px 12px; cursor: pointer; font-size: 13px; }
+    #site-frame { flex: 1; width: 100%; border: 0; background: #fff; }
+  </style>
   <section id="site-view" hidden>
-    <div class="card" style="padding:12px">
-      <div class="status-line" style="margin:2px 6px 10px">
-        <span class="dot on"></span><span id="site-label"></span>
-        <span style="margin-left:auto;color:var(--muted);font-size:12px">sandboxed — no access to your data</span>
-      </div>
-      <iframe id="site-frame" sandbox="allow-scripts allow-forms allow-pointer-lock"
-              style="width:100%;height:70vh;border:0;border-radius:12px;background:#fff"></iframe>
+    <div id="site-bar">
+      <span class="dot on"></span>
+      <span class="brand">meshare</span>
+      <span id="site-label"></span>
+      <button id="site-close" title="back to meshare">✕ close</button>
     </div>
+    <iframe id="site-frame" sandbox="allow-scripts allow-forms allow-pointer-lock"></iframe>
   </section>
 
   <section id="library-view" hidden>
@@ -694,15 +702,19 @@ async function maybeOfferSite(fileId, entry) {
   try {
     if (entry.blob.size < 12 || await entry.blob.slice(0, 8).text() !== SITE_MAGIC) return;
   } catch { return; }
-  if ($('open-site-btn')) $('open-site-btn').remove();
-  const btn = document.createElement('button');
-  btn.id = 'open-site-btn';
-  btn.className = 'btn';
-  btn.textContent = 'Open site';
-  btn.style.marginLeft = '10px';
-  btn.onclick = () => renderSite(entry).catch(e => log(`Site render failed: ${e.message || e}`, true));
-  $('save-btn').after(btn);
-  log('This share is a meshare site bundle — click "Open site" to run it (sandboxed, hash-verified first).');
+  log('This share is a meshare site — verifying and opening it full-page (sandboxed).');
+  renderSite(entry).catch(e => {
+    // If auto-open fails, fall back to a manual button so nothing is lost.
+    log(`Site render failed: ${e.message || e}`, true);
+    if ($('open-site-btn')) $('open-site-btn').remove();
+    const btn = document.createElement('button');
+    btn.id = 'open-site-btn';
+    btn.className = 'btn';
+    btn.textContent = 'Open site';
+    btn.style.marginLeft = '10px';
+    btn.onclick = () => renderSite(entry).catch(err => log(`Site render failed: ${err.message || err}`, true));
+    $('save-btn').after(btn);
+  });
 }
 
 async function renderSite(entry) {
@@ -756,10 +768,11 @@ async function renderSite(entry) {
   const html = substitute(await parts.get(manifest.entry).text());
 
   $('site-frame').srcdoc = html;
-  $('site-label').textContent = `running "${manifest.entry}" from the mesh — ${manifest.files.length} files, hash-verified`;
+  $('site-label').textContent = `· ${manifest.entry} · ${manifest.files.length} files · hash-verified · hosted P2P`;
   $('site-view').hidden = false;
-  $('site-view').scrollIntoView({ behavior: 'smooth' });
-  log('Site is running locally in a sandboxed frame. You are seeding it to the next visitor.');
+  document.documentElement.style.overflow = 'hidden';  // edge-to-edge: drop the page scrollbar
+  $('site-close').onclick = () => { $('site-view').hidden = true; $('site-frame').srcdoc = ''; document.documentElement.style.overflow = ''; };
+  log('Site is running full-page in a sandboxed frame. You are seeding it to the next visitor.');
 }
 
 // ── browser-side site bundling: host a folder with zero install ────────────
