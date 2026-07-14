@@ -91,7 +91,13 @@
       <p style="color:var(--muted);font-size:14px;margin:6px 0 12px">Pick a file — or a whole folder to host it as a P2P site. Keep this tab open — it seeds. Everyone who downloads becomes a seeder too.</p>
       <div style="margin-bottom:8px"><span class="label" style="display:inline">file</span><br><input type="file" id="share-file"></div>
       <div><span class="label" style="display:inline">or site folder</span><br><input type="file" id="share-folder" webkitdirectory multiple></div>
+      <div style="margin-top:12px">
+        <span class="label" style="display:inline">name your link <span style="text-transform:none;letter-spacing:0">(optional)</span></span><br>
+        <input type="text" id="share-name" placeholder="my-holiday-photos" autocomplete="off"
+               style="width:100%;max-width:340px;background:rgba(255,255,255,.75);border:1px solid rgba(23,23,15,.18);color:var(--text);border-radius:10px;padding:9px 12px;font-size:14px;margin-top:4px">
+      </div>
       <div><button class="btn" id="share-btn">Create link</button></div>
+      <div id="share-msg" hidden style="margin-top:10px;font-size:14px;font-weight:600"></div>
       <div class="link-box" id="link-box" hidden>
         <input id="share-link" readonly>
         <button class="btn ghost" id="copy-btn" style="margin-top:0">Copy</button>
@@ -951,6 +957,15 @@ async function startReceive(fileId) {
 
 // ── share flow (browser-only sender) ───────────────────────────────────────
 
+// Visible feedback for non-technical users (the console log is not enough).
+function shareMsg(text, isError) {
+  const el = $('share-msg');
+  el.hidden = !text;
+  el.textContent = text;
+  el.style.color = isError ? 'var(--danger)' : 'rgba(23,23,15,.65)';
+  if (text) log(text, !!isError);
+}
+
 $('share-btn').onclick = async () => {
   let file = $('share-file').files[0];
   let kind = 'file';
@@ -963,19 +978,30 @@ $('share-btn').onclick = async () => {
       log(`Site bundle built in-browser: ${b.fileCount} files, ${(file.size / 1048576).toFixed(2)} MB, entry ${b.entry} — hash-verified on arrival.`);
     } catch (e) {
       $('share-btn').disabled = false;
-      return log(`Could not bundle folder: ${e.message}`, true);
+      return shareMsg(`Could not bundle folder: ${e.message}`, true);
     }
   }
-  if (!file) return log('Choose a file or folder first.', true);
+  if (!file) return shareMsg('Choose a file or folder first.', true);
   $('share-btn').disabled = true;
+  shareMsg('');
   await turnLoaded;
+  // Slugify whatever the user typed: spaces/punctuation -> dashes.
+  const wantName = $('share-name').value.trim().toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
   let fileId;
   try {
     const res = await fetch(`${MESHARE.apiBase}/api/shares`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fileName: file.name, size: file.size, mime: file.type, kind })
+      body: JSON.stringify({ fileName: file.name, size: file.size, mime: file.type, kind, name: wantName || undefined })
     });
+    // A taken/invalid name must NOT silently fall back to a random id - tell the user.
+    if (res.status === 409 || res.status === 400) {
+      const err = await res.json().catch(() => ({}));
+      $('share-btn').disabled = false;
+      const tips = err.suggestions ? ` Try: ${err.suggestions.join(', ')}` : '';
+      return shareMsg(`${err.error || 'That name cannot be used.'}${tips}`, true);
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const reg = await res.json();
     fileId = reg.fileId;
@@ -995,10 +1021,11 @@ $('share-btn').onclick = async () => {
     $('seed-dot').className = 'dot on';
     $('seed-status').textContent = `seeding (slot ${slot}) — keep tab open`;
     log(`Sharing "${file.name}" as ${fileId} (slot ${slot}). Link copied: ${link}`);
+    shareMsg('Link copied — send it to anyone. Keep this tab open to keep sharing.');
     persistToCache(fileId, store.get(fileId));
   } catch (e) {
     store.delete(fileId);
-    log(`Could not share: ${e.message}`, true);
+    shareMsg(`Could not share: ${e.message}`, true);
   } finally { $('share-btn').disabled = false; }
 };
 
