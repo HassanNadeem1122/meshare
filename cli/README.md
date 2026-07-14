@@ -18,7 +18,7 @@ meshare <file> --password s3cret   recipients must enter the password
 meshare revoke <id>                kill a link you created, for everyone
 ```
 
-Other flags: `--no-open` (don't auto-open the seeder tab), `--port N`, `--no-backup`.
+Other flags: `--no-open` (don't auto-open the seeder tab), `--port N`, `--backup` (upload a cloud backup copy, off by default).
 
 ## How it works
 
