@@ -6,7 +6,7 @@ Share a file with one command. Everyone who opens the link downloads it browser-
 
 ![meshare — one command hosts a site or shares a file, peer-to-peer](demo.gif)
 
-> One command hosts the `bounce` game over P2P. A fresh browser (right) loads and runs it with **nothing installed**, hash-verified, while your terminal (left) shows the link, QR, and live seeding.
+> `meshare site ./examples/bounce-demo` → link + QR appear instantly → a fresh browser downloads it peer-to-peer (hash-verified) and opens the game **full-screen, nothing installed**.
 
 ### Quick start
 
