@@ -3,35 +3,37 @@
 <title>meshare — seeding</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
 <style>
-  :root { --bg:#0f1012; --card:#17181b; --card-2:#1d1f23; --line:#26282d; --lime:#d9f24b; --text:#f2f2f0; --muted:#8b8e94; --danger:#ff6b5e; }
+  :root { --bg:#f3f3ee; --card:#ffffff; --card-2:#f0f0e8; --line:#e4e4da; --lime:#eef227; --orange:#ff8438; --text:#17170f; --muted:#7c7c72; --danger:#e5484d; }
   * { box-sizing: border-box; }
   body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; padding: 24px 16px; }
   main { max-width: 640px; margin: 0 auto; }
   header { display: flex; align-items: center; gap: 10px; max-width: 640px; margin: 0 auto 20px; }
-  .mark { font-weight: 800; font-size: 22px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 22px; margin-bottom: 16px; overflow: hidden; }
-  .stripe { height: 8px; margin: -22px -22px 18px; background: repeating-linear-gradient(-45deg, var(--lime) 0 10px, transparent 10px 20px); opacity: .9; }
+  .mark { font-weight: 800; font-size: 22px; background: var(--text); color: #fff; border-radius: 999px; padding: 6px 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 22px; margin-bottom: 16px; overflow: hidden; box-shadow: 0 2px 10px rgba(23,23,15,.04); }
+  .card.hero { background: var(--lime); border-color: transparent; }
+  .card.hero .label, .card.hero .file-size, .card.hero .status-line { color: rgba(23,23,15,.6); }
+  .stripe { height: 10px; margin: -22px -22px 18px; background: repeating-linear-gradient(-45deg, var(--text) 0 12px, transparent 12px 24px); }
   .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 1.2px; margin-bottom: 8px; }
   .file-name { font-size: 18px; font-weight: 700; word-break: break-all; }
   .file-size { color: var(--muted); font-size: 13px; margin-top: 2px; }
   .big-stat { font-size: 64px; font-weight: 800; letter-spacing: -2px; line-height: 1; margin: 12px 0 8px; }
   .status-line { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 14px; color: var(--muted); }
-  .dot { width: 10px; height: 10px; border-radius: 50%; background: #4a4d52; flex: none; }
-  .dot.on { background: var(--lime); box-shadow: 0 0 10px rgba(217,242,75,.55); animation: pulse 1.6s ease-in-out infinite; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #c8c8ba; flex: none; }
+  .dot.on { background: #b9c904; box-shadow: 0 0 0 3px rgba(238,242,39,.35); animation: pulse 1.6s ease-in-out infinite; }
   .dot.err { background: var(--danger); }
   @keyframes pulse { 50% { opacity: .45; } }
   .peer-row { display: flex; align-items: center; gap: 10px; background: var(--card-2); border-radius: 12px; padding: 10px 14px; margin-top: 8px; font-size: 13px; }
   .peer-row .meta { color: var(--muted); margin-left: auto; font-variant-numeric: tabular-nums; }
   .empty { color: var(--muted); font-size: 13px; }
-  .link { color: var(--lime); font-family: ui-monospace, monospace; font-size: 13px; word-break: break-all; }
-  #log { background: #0a0b0c; border-radius: 12px; padding: 12px; font: 11.5px/1.6 ui-monospace, monospace; color: #9fdf9f; max-height: 30vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
-  #log .err { color: var(--danger); }
+  .link { color: var(--text); font-weight: 600; font-family: ui-monospace, monospace; font-size: 13px; word-break: break-all; }
+  #log { background: #17170f; border-radius: 12px; padding: 12px; font: 11.5px/1.6 ui-monospace, monospace; color: #d7e87a; max-height: 30vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
+  #log .err { color: #ff8a80; }
   details { margin-top: 8px; } summary { color: var(--muted); font-size: 13px; cursor: pointer; }
 </style>
 
 <header><span class="mark">meshare</span><span class="dot on" id="head-dot"></span><span style="color:var(--muted);font-size:13px">CLI seeder</span></header>
 <main>
-  <div class="card">
+  <div class="card hero">
     <div class="stripe"></div>
     <div class="label">seeding</div>
     <div class="file-name" id="f-name">loading…</div>
