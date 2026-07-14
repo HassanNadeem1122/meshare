@@ -2,7 +2,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>meshare</title>
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#0f1012">
+<meta name="theme-color" content="#f3f3ee">
 <link rel="icon" href="icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
@@ -24,6 +24,10 @@
   #share-view > .card { background: var(--lime); border-color: transparent; }
   #share-view > .card .label { color: rgba(23, 23, 15, .6); }
   #share-view > .card p:first-of-type { color: rgba(23, 23, 15, .6) !important; }
+  /* On yellow heroes the orange stripe goes muddy - use ink for contrast. */
+  #share-view > .card .stripe, #receive-view > .card .stripe {
+    background: repeating-linear-gradient(-45deg, var(--text) 0 12px, transparent 12px 24px);
+  }
   .stripe { height: 10px; margin: -22px -22px 18px; background: repeating-linear-gradient(-45deg, var(--orange) 0 12px, transparent 12px 24px); }
   .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 1.2px; margin-bottom: 8px; }
   .file-name { font-size: 18px; font-weight: 700; word-break: break-all; }

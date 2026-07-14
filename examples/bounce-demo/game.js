@@ -2,7 +2,7 @@ const cv = document.getElementById('c');
 const x = cv.getContext('2d');
 const $ = id => document.getElementById(id);
 
-const INK = '#17170f', YELLOW = '#eef227', ORANGE = '#ff8438', DOT = '#e0e0d4';
+const INK = '#17170f', YELLOW = '#eef227', ORANGE = '#ff8438', DOT = '#d3d3bf';
 const W = cv.width, H = cv.height, R = 22;
 
 let playing = false, score = 0, best = 0, timeLeft = 30;
@@ -69,9 +69,9 @@ function draw(now) {
 
   // dotted grid backdrop
   x.fillStyle = DOT;
-  for (let gy = 14; gy < H; gy += 22)
-    for (let gx = 14; gx < W; gx += 22) {
-      x.beginPath(); x.arc(gx, gy, 1.6, 0, 7); x.fill();
+  for (let gy = 16; gy < H; gy += 24)
+    for (let gx = 16; gx < W; gx += 24) {
+      x.beginPath(); x.arc(gx, gy, 2.2, 0, 7); x.fill();
     }
 
   if (playing) {
