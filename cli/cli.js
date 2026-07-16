@@ -11,7 +11,7 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const qrcode = require('qrcode-terminal');
 
-const APP_URL = 'https://meshare.just1hassanhere.workers.dev';
+const APP_URL = 'https://meshare.meshareapp.workers.dev';
 const TOKEN_STORE = path.join(os.homedir(), '.meshare', 'shares.json');
 
 const LIME = s => `\x1b[93m${s}\x1b[0m`;

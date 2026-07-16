@@ -47,7 +47,7 @@ meshare revoke <id>                kill one of your links, for everyone
 
 v1 scope, honestly: single-page sites and games with directly-referenced assets (scripts, styles, images, audio) work; sites that `fetch()` their own files at runtime or use routing need the service-worker serving mode on the roadmap.
 
-No CLI? Open the [web app](https://meshare.just1hassanhere.workers.dev), pick a file, get a link — sharing works entirely in the browser too.
+No CLI? Open the [web app](https://meshare.meshareapp.workers.dev), pick a file, get a link — sharing works entirely in the browser too.
 
 ## What's actually shipped
 
