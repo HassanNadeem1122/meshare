@@ -1,9 +1,10 @@
 // meshare service worker: makes the app installable and the shell loadable
 // offline. It does NOT (and cannot) keep WebRTC seeding alive after the tab
 // closes - RTCPeerConnection only exists in window contexts.
-const CACHE = 'meshare-shell-v1';
+const CACHE = 'meshare-shell-v2';
 const SHELL = [
   './',
+  'live',
   'manifest.json',
   'icon-192.png',
   'icon-512.png',

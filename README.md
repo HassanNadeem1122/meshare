@@ -64,12 +64,13 @@ No CLI? Open the [web app](https://meshare.meshareapp.workers.dev), pick a file,
 | Password protection | Shared-secret gate enforced at both the mesh layer and the registry |
 | Rate limiting | Durable (cross-isolate) per-IP limits on registration, uploads, downloads, and credential minting |
 | P2P site hosting (v1) | `meshare site ./folder` — hash-verified bundles, sandboxed execution, visitors become mirrors |
+| Live rooms | Disposable P2P chat rooms — share a link, full-mesh presence + chat, gone when everyone leaves |
 
-## Experimental: live rooms (`live/room.html`)
+## Live rooms — disposable P2P chat
 
-A preview of real-time, serverless rooms. Everyone who opens the same room name connects **directly** to each other (full mesh, reusing the seeder-slot discovery pattern) for live **presence + chat** — no server stores a byte. Verified with 3 peers: presence, chat broadcast, and clean leave all sync.
+**[meshare.meshareapp.workers.dev/live.html](https://meshare.meshareapp.workers.dev/live.html)** — pick a room name, send the link. Everyone in the room connects **directly** to each other (full mesh, reusing the same seeder-slot discovery pattern as file sharing) for live presence + chat. No account, no history, no server stores a byte — when the last person leaves, the room has never existed.
 
-Honest scope: **ephemeral** — state is alive only while people are present and gone when the room empties (browser-pure P2P can't persist a room with nobody in it — every "decentralized" chat quietly runs relay servers for that). Best for ≤8 peers. Conflict-free shared *documents* (collaborative editing) would need a CRDT layer (Yjs) on top of this — not built yet.
+Honest scope: **ephemeral by design** — state lives only while people are present (browser-pure P2P can't persist a room with nobody in it; every "decentralized" chat that appears to quietly runs relay servers for that). Best for ≤8 peers: quick standups, "everyone open this link" moments, chat that shouldn't leave a trace. Conflict-free shared *documents* (collaborative editing) would need a CRDT layer (Yjs) on top — not built yet.
 
 ## Known limitations — read before relying on it
 

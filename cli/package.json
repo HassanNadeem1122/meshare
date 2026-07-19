@@ -2,13 +2,33 @@
   "name": "meshare",
   "version": "1.0.1",
   "description": "P2P file sharing where every downloader becomes a server. One command → link + QR code; recipients need nothing installed.",
-  "bin": { "meshare": "./cli.js" },
-  "files": ["cli.js", "seeder.html"],
-  "keywords": ["p2p", "file-sharing", "webrtc", "file-transfer", "mesh", "cli", "qr-code", "peerjs", "share"],
+  "bin": {
+    "meshare": "cli.js"
+  },
+  "files": [
+    "cli.js",
+    "seeder.html"
+  ],
+  "keywords": [
+    "p2p",
+    "file-sharing",
+    "webrtc",
+    "file-transfer",
+    "mesh",
+    "cli",
+    "qr-code",
+    "peerjs",
+    "share"
+  ],
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/HassanNadeem1122/meshare.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HassanNadeem1122/meshare.git"
+  },
   "homepage": "https://meshare.meshareapp.workers.dev",
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "qrcode-terminal": "^0.12.0"
   }

@@ -1,0 +1,278 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>meshare live — disposable rooms</title>
+<meta name="theme-color" content="#f3f3ee">
+<link rel="icon" href="icon-192.png" type="image/png">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<style>
+  :root {
+    --bg: #f3f3ee; --card: #ffffff; --card-2: #f0f0e8; --line: #e4e4da;
+    --lime: #eef227; --orange: #ff8438; --text: #17170f; --muted: #7c7c72; --danger: #e5484d;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; padding: 24px 16px 60px; }
+  main { max-width: 720px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: 10px; max-width: 720px; margin: 0 auto 24px; }
+  header .mark { font-weight: 800; font-size: 22px; letter-spacing: -0.5px; }
+  header .mark a { color: inherit; text-decoration: none; }
+  .tag { color: var(--text); font-size: 12px; background: var(--lime); border-radius: 999px; padding: 3px 12px; font-weight: 700; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 22px; margin-bottom: 16px; overflow: hidden; box-shadow: 0 2px 10px rgba(23, 23, 15, .04); }
+  .card.hero { background: var(--lime); border-color: transparent; }
+  .card.hero .label, .card.hero p { color: rgba(23, 23, 15, .6); }
+  .stripe { height: 10px; margin: -22px -22px 18px; background: repeating-linear-gradient(-45deg, var(--text) 0 12px, transparent 12px 24px); }
+  .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 1.2px; margin-bottom: 8px; }
+  .big-stat { font-size: 64px; font-weight: 800; letter-spacing: -2px; line-height: 1; margin: 10px 0; font-variant-numeric: tabular-nums; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #b9b9ad; flex: none; }
+  .dot.on { background: #b9c904; box-shadow: 0 0 0 3px rgba(238, 242, 39, .35); animation: pulse 1.6s ease-in-out infinite; }
+  .dot.err { background: var(--danger); }
+  @keyframes pulse { 50% { opacity: .45; } }
+  .grid { display: grid; grid-template-columns: 220px 1fr; gap: 16px; }
+  @media (max-width: 620px) { .grid { grid-template-columns: 1fr; } }
+  .grid .card { margin-bottom: 0; }
+  .peer { display: flex; align-items: center; gap: 9px; background: var(--card-2); border-radius: 12px; padding: 9px 13px; margin-top: 8px; font-size: 14px; }
+  .peer .you { color: var(--muted); font-size: 11px; margin-left: auto; }
+  #chat { height: 46vh; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+  .msg { background: var(--card-2); border-radius: 12px; padding: 8px 12px; font-size: 14px; max-width: 85%; overflow-wrap: anywhere; }
+  .msg.me { background: var(--text); color: #fff; align-self: flex-end; }
+  .msg .who { font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+  .msg.me .who { color: rgba(255,255,255,.55); }
+  .msg.sys { align-self: center; background: none; color: var(--muted); font-size: 12px; padding: 2px; }
+  .row { display: flex; gap: 8px; margin-top: 12px; }
+  input { background: var(--card-2); border: 1px solid var(--line); color: var(--text); border-radius: 10px; padding: 11px 13px; font: inherit; }
+  #msg-input { flex: 1; min-width: 0; }
+  .btn { background: var(--text); color: #fff; font-weight: 700; border: none; border-radius: 999px; padding: 12px 24px; font-size: 15px; cursor: pointer; }
+  .btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--text); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  #status { color: var(--muted); font-size: 13px; }
+  .join { max-width: 460px; margin: 6vh auto 0; }
+  .join input { width: 100%; margin: 8px 0; text-align: center; }
+  .link-box { display: flex; gap: 8px; margin-top: 14px; }
+  .link-box input { flex: 1; min-width: 0; background: rgba(255,255,255,.75); border: 1px solid rgba(23,23,15,.18); border-radius: 10px; padding: 10px 12px; font-size: 13px; font-family: ui-monospace, monospace; text-align: left; }
+  details { margin-top: 20px; }
+  summary { color: var(--muted); font-size: 13px; cursor: pointer; }
+  #log { background: #0a0b0c; border-radius: 12px; padding: 12px; font: 11.5px/1.6 ui-monospace, monospace; color: #9fdf9f; max-height: 30vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
+  #log .err { color: var(--danger); }
+</style>
+
+<header>
+  <span class="mark"><a href="/">meshare</a></span><span class="tag">live</span>
+  <span class="dot" id="net-dot" style="margin-left:auto"></span><span id="status">…</span>
+</header>
+<main>
+
+  <section id="join-view" class="join">
+    <div class="card hero">
+      <div class="stripe"></div>
+      <div class="label">disposable room</div>
+      <p style="font-size:14px;margin:6px 0 12px">Pick a room name, send the link — everyone in it connects <b>directly, peer-to-peer</b>. Live presence and chat while people are here. When the last person leaves, the room is gone. No account, no server storing a byte.</p>
+      <input id="room-input" placeholder="room name (e.g. team-standup)" autocomplete="off" maxlength="40">
+      <input id="name-input" placeholder="your name" autocomplete="off" maxlength="24">
+      <p style="margin-bottom:0"><button class="btn" id="join-btn">Join room</button></p>
+    </div>
+  </section>
+
+  <section id="room-view" hidden>
+    <div class="card hero" style="padding:16px 22px">
+      <div class="label">invite anyone — send this link</div>
+      <div class="link-box" style="margin-top:8px">
+        <input id="room-link" readonly>
+        <button class="btn ghost" id="copy-btn" style="padding:8px 18px;font-size:13px">Copy</button>
+      </div>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <div class="label">in this room</div>
+        <div class="big-stat" id="peer-count">1</div>
+        <div id="peer-list"></div>
+      </div>
+      <div class="card" style="display:flex;flex-direction:column">
+        <div class="label">chat <span id="room-name-label" style="color:var(--orange)"></span></div>
+        <div id="chat"></div>
+        <div class="row">
+          <input id="msg-input" placeholder="type a message…" autocomplete="off" disabled>
+          <button class="btn" id="send-btn" disabled>Send</button>
+        </div>
+      </div>
+    </div>
+    <details><summary>connection log</summary><div id="log"></div></details>
+  </section>
+</main>
+
+<script>
+const MESHARE = {
+  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.relay.metered.ca:80' }],
+  turnEndpoint: 'https://meshare-turn.meshareapp.workers.dev/turn-credentials',
+  maxSeats: 8
+};
+const $ = id => document.getElementById(id);
+function log(m, e) { const d = document.createElement('div'); d.textContent = `[${new Date().toLocaleTimeString()}] ${m}`; if (e) d.className = 'err'; $('log').appendChild(d); $('log').scrollTop = $('log').scrollHeight; (e ? console.error : console.log)('[meshare:live] ' + m); }
+function setStatus(m) { $('status').textContent = m; }
+
+async function loadTurn() {
+  try {
+    const c = new AbortController(); const t = setTimeout(() => c.abort(), 5000);
+    const res = await fetch(MESHARE.turnEndpoint, { signal: c.signal }); clearTimeout(t);
+    const data = await res.json();
+    const turn = (data.iceServers || []).filter(s => [].concat(s.urls).some(u => /^turns?:/i.test(u)));
+    MESHARE.iceServers = MESHARE.iceServers.concat(turn);
+    log(`TURN: ${turn.length} relay entries loaded.`);
+  } catch (e) { log(`TURN unavailable (${e.message}) — direct only.`, true); }
+}
+
+const seatName = (room, n) => `meshare-room-${room}-${n}`;
+let myName = 'anon', roomId = null, mySeat = null, peer = null;
+const conns = new Map();     // remotePeerId -> DataConnection
+const roster = new Map();    // remotePeerId -> displayName
+const lastSeen = new Map();  // remotePeerId -> ms timestamp of last data
+
+// Heartbeat: a killed tab / dropped network never fires 'close', which would
+// leave a ghost member in the roster. Ping every 5s; silence >15s = gone.
+// Also self-heals: if the link to a lower seat is missing (signaling hiccup
+// at join, member dropped and rejoined), keep retrying the connection.
+const lastTry = new Map();   // seatId -> ms timestamp of last connect attempt
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, conn] of conns) {
+    if (now - (lastSeen.get(id) || now) > 15000) {
+      log(`Peer ${id.slice(-12)} silent >15s — dropping as gone.`);
+      try { conn.close(); } catch {}
+      dropPeer(id);
+    } else {
+      try { conn.send({ t: 'ping' }); } catch {}
+    }
+  }
+  if (peer && peer.open && mySeat != null) {
+    for (let n = 0; n < mySeat; n++) {
+      const id = seatName(roomId, n);
+      if (!conns.has(id) && now - (lastTry.get(id) || 0) > 10000) {
+        lastTry.set(id, now);
+        wireConn(peer.connect(id, { reliable: true }));
+      }
+    }
+  }
+}, 5000);
+
+function dropPeer(id) {
+  if (!conns.has(id) && !roster.has(id)) return;
+  const name = roster.get(id);
+  conns.delete(id); roster.delete(id); lastSeen.delete(id); renderRoster();
+  if (name) addMsg('', `${name} left`, 'sys');
+}
+
+function renderRoster() {
+  $('peer-count').textContent = roster.size + 1;
+  const el = $('peer-list'); el.textContent = '';
+  const me = document.createElement('div'); me.className = 'peer';
+  me.innerHTML = `<span class="dot on"></span><span>${escapeHtml(myName)}</span><span class="you">you · seat ${mySeat}</span>`;
+  el.appendChild(me);
+  for (const [, name] of roster) {
+    const d = document.createElement('div'); d.className = 'peer';
+    d.innerHTML = `<span class="dot on"></span><span>${escapeHtml(name)}</span>`;
+    el.appendChild(d);
+  }
+}
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+function addMsg(who, text, cls) {
+  const d = document.createElement('div'); d.className = 'msg ' + (cls || '');
+  if (cls === 'sys') d.textContent = text;
+  else d.innerHTML = `<div class="who">${escapeHtml(who)}</div>${escapeHtml(text)}`;
+  $('chat').appendChild(d); $('chat').scrollTop = $('chat').scrollHeight;
+}
+
+function wireConn(conn) {
+  conn.on('open', () => {
+    conns.set(conn.peer, conn);
+    lastSeen.set(conn.peer, Date.now());
+    conn.send({ t: 'hello', name: myName });
+    log(`Connected to ${conn.peer.slice(-12)} (${conns.size} peer link${conns.size === 1 ? '' : 's'}).`);
+  });
+  conn.on('data', d => {
+    lastSeen.set(conn.peer, Date.now());
+    if (!d || typeof d !== 'object') return;
+    if (d.t === 'hello') {
+      if (!roster.has(conn.peer)) addMsg('', `${d.name} joined`, 'sys');
+      roster.set(conn.peer, d.name); renderRoster();
+    } else if (d.t === 'chat') {
+      addMsg(roster.get(conn.peer) || d.name || 'someone', d.text);
+    }
+  });
+  conn.on('close', () => {
+    dropPeer(conn.peer);
+    log(`Peer ${conn.peer.slice(-12)} disconnected.`);
+  });
+  conn.on('error', e => log(`Conn error: ${e.message || e}`, true));
+}
+
+// Claim the lowest free seat; the signaling server rejecting an id ("taken")
+// tells us that seat is occupied by another member.
+function claimSeat(n = 0) {
+  return new Promise((resolve, reject) => {
+    if (n >= MESHARE.maxSeats) return reject(new Error(`room full (${MESHARE.maxSeats} seats)`));
+    const p = new Peer(seatName(roomId, n), { debug: 1, config: { iceServers: MESHARE.iceServers } });
+    p.on('open', () => resolve({ p, seat: n }));
+    p.on('error', err => {
+      if (err.type === 'unavailable-id') { p.destroy(); claimSeat(n + 1).then(resolve, reject); }
+      else if (!p.open) { p.destroy(); reject(err); }
+      // 'peer-unavailable' is routine: the self-heal retry probing an empty seat.
+      else if (err.type !== 'peer-unavailable') log(`Peer error: ${err.type}`, true);
+    });
+  });
+}
+
+async function joinRoom() {
+  roomId = $('room-input').value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, '');
+  myName = ($('name-input').value.trim() || 'anon').slice(0, 24);
+  if (!roomId) return alert('enter a room name');
+  $('join-btn').disabled = true;
+  $('join-view').hidden = true; $('room-view').hidden = false;
+  $('room-name-label').textContent = '· ' + roomId;
+  const link = `${location.origin}/live#${roomId}`;
+  $('room-link').value = link;
+  history.replaceState(null, '', '#' + roomId);
+  await loadTurn();
+  try {
+    const { p, seat } = await claimSeat();
+    peer = p; mySeat = seat;
+    $('net-dot').className = 'dot on';
+    setStatus(`live in "${roomId}"`);
+    log(`Joined room "${roomId}" as seat ${seat}.`);
+    renderRoster();
+    // Connect to every lower-numbered seat that's occupied (one link per pair).
+    for (let n = 0; n < seat; n++) {
+      const conn = peer.connect(seatName(roomId, n), { reliable: true });
+      wireConn(conn);
+    }
+    // Accept links from higher seats that join later.
+    peer.on('connection', c => wireConn(c));
+    peer.on('disconnected', () => { if (!peer.destroyed) peer.reconnect(); });
+    $('msg-input').disabled = false; $('send-btn').disabled = false; $('msg-input').focus();
+    addMsg('', `you joined "${roomId}" — this room disappears when everyone leaves`, 'sys');
+  } catch (e) {
+    $('net-dot').className = 'dot err';
+    setStatus('could not join: ' + (e.message || e));
+    log(`Join failed: ${e.message || e}`, true);
+  }
+}
+
+function sendMsg() {
+  const text = $('msg-input').value.trim();
+  if (!text) return;
+  addMsg(myName, text, 'me');
+  for (const conn of conns.values()) { try { conn.send({ t: 'chat', name: myName, text }); } catch {} }
+  $('msg-input').value = '';
+}
+
+$('join-btn').onclick = joinRoom;
+$('send-btn').onclick = sendMsg;
+$('copy-btn').onclick = () => { navigator.clipboard.writeText($('room-link').value); $('copy-btn').textContent = 'Copied!'; setTimeout(() => $('copy-btn').textContent = 'Copy', 1200); };
+$('msg-input').addEventListener('keydown', e => { if (e.key === 'Enter') sendMsg(); });
+$('room-input').addEventListener('keydown', e => { if (e.key === 'Enter') $('name-input').focus(); });
+$('name-input').addEventListener('keydown', e => { if (e.key === 'Enter') joinRoom(); });
+
+// Invite links: live.html#room-name prefills the room, you just type a name.
+const h = location.hash.slice(1).trim();
+if (h) { $('room-input').value = decodeURIComponent(h); $('name-input').focus(); }
+setStatus('pick a room to join');
+window.addEventListener('beforeunload', () => { if (peer) peer.destroy(); });
+</script>
