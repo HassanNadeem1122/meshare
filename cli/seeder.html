@@ -1,6 +1,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>meshare — seeding</title>
+<title>meshare - seeding</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
 <style>
   :root { --bg:#f3f3ee; --card:#ffffff; --card-2:#f0f0e8; --line:#e4e4da; --lime:#eef227; --orange:#ff8438; --text:#17170f; --muted:#7c7c72; --danger:#e5484d; }
@@ -116,7 +116,7 @@ async function loadTurnCredentials() {
       return;
     } catch (e) { log(`TURN: ${url} failed (${e.message || e})`, true); }
   }
-  log('WARNING: no TURN source — strict-NAT recipients may fail.', true);
+  log('WARNING: no TURN source - strict-NAT recipients may fail.', true);
 }
 
 async function pathOf(conn) {
@@ -136,7 +136,7 @@ async function pathOf(conn) {
 async function serveRange(conn, key, req) {
   if (meta.pwHash && req.pw !== meta.pwHash) {
     conn.send({ type: 'error', message: 'password required or incorrect' });
-    return log(`Refused range request from ${conn.peer} — wrong or missing password.`, true);
+    return log(`Refused range request from ${conn.peer} - wrong or missing password.`, true);
   }
   const from = Math.max(0, Number(req.from) || 0);
   const to = Math.min(blob.size, Number(req.to) || 0);
@@ -157,7 +157,7 @@ async function serveRange(conn, key, req) {
 async function serveFile(conn, key, pw) {
   if (meta.pwHash && pw !== meta.pwHash) {
     conn.send({ type: 'error', message: 'password required or incorrect' });
-    return log(`Refused ${conn.peer} — wrong or missing password.`, true);
+    return log(`Refused ${conn.peer} - wrong or missing password.`, true);
   }
   const CS = MESHARE.chunkSize;
   const chunkCount = Math.max(1, Math.ceil(blob.size / CS));
@@ -209,7 +209,7 @@ function claimSlot(fileId, n = 0) {
     const claimed = await claimSlot(meta.fileId);
     slot = claimed.slot;
     $('s-dot').className = 'dot on';
-    $('s-status').textContent = `seeding as slot ${slot} — keep this tab open`;
+    $('s-status').textContent = `seeding as slot ${slot} - keep this tab open`;
     log(`Registered as seeder slot ${slot} for ${meta.fileId}.`);
     report('seeding');
     claimed.peer.on('connection', conn => {
@@ -233,7 +233,7 @@ function claimSlot(fileId, n = 0) {
       conn.on('error', e => log(`Connection error: ${e.message || e}`, true));
     });
     claimed.peer.on('disconnected', () => {
-      if (!claimed.peer.destroyed) { log('Signaling lost — reconnecting…', true); claimed.peer.reconnect(); }
+      if (!claimed.peer.destroyed) { log('Signaling lost - reconnecting…', true); claimed.peer.reconnect(); }
     });
     if (!meta.legacy) {
       const guard = setInterval(async () => {
@@ -245,8 +245,8 @@ function claimSlot(fileId, n = 0) {
             clearInterval(guard);
             claimed.peer.destroy();
             $('s-dot').className = 'dot err';
-            $('s-status').textContent = `share ${info.status} — seeding stopped`;
-            log(`This share is now ${info.status} — seeder shut down.`, true);
+            $('s-status').textContent = `share ${info.status} - seeding stopped`;
+            log(`This share is now ${info.status} - seeder shut down.`, true);
             report(info.status);
           }
         } catch {}

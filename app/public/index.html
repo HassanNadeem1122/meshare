@@ -88,7 +88,7 @@
     <div class="card">
       <div class="stripe"></div>
       <div class="label">share a file</div>
-      <p style="color:var(--muted);font-size:14px;margin:6px 0 12px">Pick a file — or a whole folder to host it as a P2P site. Keep this tab open — it seeds. Everyone who downloads becomes a seeder too.</p>
+      <p style="color:var(--muted);font-size:14px;margin:6px 0 12px">Pick a file - or a whole folder to host it as a P2P site. Keep this tab open - it seeds. Everyone who downloads becomes a seeder too.</p>
       <div style="margin-bottom:8px"><span class="label" style="display:inline">file</span><br><input type="file" id="share-file"></div>
       <div><span class="label" style="display:inline">or site folder</span><br><input type="file" id="share-folder" webkitdirectory multiple></div>
       <div style="margin-top:12px">
@@ -106,7 +106,7 @@
     <div class="card" style="display:flex;align-items:center;gap:14px;padding:16px 22px">
       <div style="flex:1;min-width:0">
         <div class="label" style="margin-bottom:2px">live rooms</div>
-        <div style="font-size:13.5px;color:var(--muted)">Disposable chat rooms — share a link, talk peer-to-peer, room vanishes when everyone leaves. No account, no history, no server.</div>
+        <div style="font-size:13.5px;color:var(--muted)">Disposable chat rooms - share a link, talk peer-to-peer, room vanishes when everyone leaves. No account, no history, no server.</div>
       </div>
       <a class="btn ghost" href="/live" style="margin:0;padding:9px 20px;font-size:13.5px;white-space:nowrap">Open</a>
     </div>
@@ -136,7 +136,7 @@
   </style>
   <section id="site-view" hidden>
     <iframe id="site-frame" sandbox="allow-scripts allow-forms allow-pointer-lock"></iframe>
-    <div id="site-badge" title="this site is hosted peer-to-peer through meshare — sandboxed and hash-verified">
+    <div id="site-badge" title="this site is hosted peer-to-peer through meshare - sandboxed and hash-verified">
       <span class="dot"></span>
       <span class="brand">meshare</span>
       <span id="site-label"></span>
@@ -147,10 +147,10 @@
   <section id="library-view" hidden>
     <div class="card">
       <div class="stripe"></div>
-      <div class="label">your files — cached on this device</div>
+      <div class="label">your files - cached on this device</div>
       <div id="library-list"></div>
       <div class="status-line" style="margin-top:14px"><span class="dot" style="background:var(--lime)"></span>
-        <span>Seeding runs while this page is open. Closing it pauses your seeding — browsers end P2P connections with the tab. Reopen any time: files come back instantly from cache, no re-download.</span></div>
+        <span>Seeding runs while this page is open. Closing it pauses your seeding - browsers end P2P connections with the tab. Reopen any time: files come back instantly from cache, no re-download.</span></div>
     </div>
   </section>
 
@@ -200,7 +200,7 @@ function log(msg, isError) {
 
 const fmtBytes = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1024 ? (n / 1024).toFixed(0) + ' KB' : n + ' B';
 
-// ── mesh core (Stage 3/4 logic, restyled shell) ────────────────────────────
+// ── mesh core (seeder slots, chunked transfer, dedupe cache) ───────────────
 
 const store = new Map();       // fileId -> { name, mime, blob }
 const seederPeers = new Map(); // fileId -> { peer, slot }
@@ -252,7 +252,7 @@ async function loadTurnCredentials() {
   }
   window.MESHARE.turnState = 'unavailable';
   $('net-label').textContent = 'direct only (no relay)';
-  log('WARNING: no TURN source reachable — strict-NAT peers may not connect.', true);
+  log('WARNING: no TURN source reachable - strict-NAT peers may not connect.', true);
 }
 const turnLoaded = loadTurnCredentials();
 
@@ -324,9 +324,9 @@ async function persistToCache(fileId, entry) {
   try {
     await idbPut(fileId, { fileId, name: entry.name, mime: entry.mime, blob: entry.blob, pwHash: entry.pwHash || null, addedAt: Date.now() });
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
-    log(`Cached "${entry.name}" on this device — reopening this page re-seeds it instantly, no re-download.`);
+    log(`Cached "${entry.name}" on this device - reopening this page re-seeds it instantly, no re-download.`);
   } catch (e) {
-    log(`Could not cache file locally (${e.message || e}) — seeding still works while this tab is open.`, true);
+    log(`Could not cache file locally (${e.message || e}) - seeding still works while this tab is open.`, true);
   }
   renderLibrary();
 }
@@ -365,7 +365,7 @@ function renderLibrary() {
           if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
           const s = seederPeers.get(id);
           if (s) { s.peer.destroy(); seederPeers.delete(id); }
-          log(`Revoked share ${id} — new downloads are disabled (already-downloaded copies can't be recalled). Your local file is kept.`);
+          log(`Revoked share ${id} - new downloads are disabled (already-downloaded copies can't be recalled). Your local file is kept.`);
         } catch (e) {
           log(`Revoke failed: ${e.message}`, true);
         }
@@ -397,13 +397,13 @@ async function reseedFromCache(fileId) {
   if (seederPeers.has(fileId)) return;
   const info = await fetchShareMeta(fileId);
   if (!info.unknown && info.status !== 'active') {
-    log(`Not re-seeding "${store.get(fileId).name}" — this share is ${info.status}. The file stays in your local cache.`, true);
+    log(`Not re-seeding "${store.get(fileId).name}" - this share is ${info.status}. The file stays in your local cache.`, true);
     renderLibrary();
     return;
   }
   try {
     const { slot } = await claimSeederSlot(fileId);
-    log(`Mesh: re-seeding "${store.get(fileId).name}" from cache as slot ${slot} — no re-download, no original sender needed.`);
+    log(`Mesh: re-seeding "${store.get(fileId).name}" from cache as slot ${slot} - no re-download, no original sender needed.`);
   } catch (e) {
     log(`Could not re-seed ${fileId}: ${e.message}`, true);
   }
@@ -449,7 +449,7 @@ function claimSeederSlot(fileId, startAt = 0) {
         resolve({ peer: p, slot: n });
       });
       p.on('error', err => {
-        if (err.type === 'unavailable-id') { log(`Mesh: slot ${n} taken — trying ${n + 1}.`); p.destroy(); tryNext(n + 1); }
+        if (err.type === 'unavailable-id') { log(`Mesh: slot ${n} taken - trying ${n + 1}.`); p.destroy(); tryNext(n + 1); }
         else if (!p.open) { p.destroy(); reject(new Error(`${err.type}: ${err.message || err}`)); }
         else log(`Seeder peer error (${err.type}): ${err.message || err}`, true);
       });
@@ -488,7 +488,7 @@ async function serveRange(conn, key, req) {
   if (!entry) return conn.send({ type: 'error', message: `no file ${req.fileId} here` });
   if (entry.pwHash && req.pw !== entry.pwHash) {
     conn.send({ type: 'error', message: 'password required or incorrect' });
-    return log(`Mesh: refused range request from ${conn.peer} — wrong or missing password.`, true);
+    return log(`Mesh: refused range request from ${conn.peer} - wrong or missing password.`, true);
   }
   const blob = entry.blob;
   const from = Math.max(0, Number(req.from) || 0);
@@ -512,7 +512,7 @@ async function serveFile(conn, fileId, slot, key, pw) {
   if (!entry) { conn.send({ type: 'error', message: `no file ${fileId} here` }); return log(`Mesh: ${conn.peer} asked for unknown file ${fileId}.`, true); }
   if (entry.pwHash && pw !== entry.pwHash) {
     conn.send({ type: 'error', message: 'password required or incorrect' });
-    return log(`Mesh: refused ${conn.peer} — wrong or missing password for "${entry.name}".`, true);
+    return log(`Mesh: refused ${conn.peer} - wrong or missing password for "${entry.name}".`, true);
   }
   const { name, mime, blob } = entry;
   const CS = MESHARE.chunkSize;
@@ -584,7 +584,7 @@ function receiveFile(conn, fileId, pwHash, onProgress) {
   });
 }
 
-// ── share registry (Stage 7: names, expiry, revocation, passwords, R2) ─────
+// ── share registry (names, expiry, revocation, passwords, R2) ──────────────
 
 async function sha256Hex(text) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
@@ -598,7 +598,7 @@ async function fetchShareMeta(fileId) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (e) {
-    log(`Registry unreachable (${e.message || e}) — treating as legacy share.`, true);
+    log(`Registry unreachable (${e.message || e}) - treating as legacy share.`, true);
     return { unknown: true };
   }
 }
@@ -634,13 +634,13 @@ async function completeReceive(fileId, entry, pwHash, sourceLabel) {
   try { isSite = entry.blob.size >= 8 && await entry.blob.slice(0, 8).text() === SITE_MAGIC; } catch {}
   if (!isSite) save.click();
   $('r-dot').className = 'dot on';
-  $('r-status').textContent = isSite ? 'site received — verified' : 'download complete — verified';
+  $('r-status').textContent = isSite ? 'site received - verified' : 'download complete - verified';
   log(`Transfer source: ${sourceLabel}.`);
   try {
     const { slot } = await claimSeederSlot(fileId);
     $('seed-dot').className = 'dot on';
-    $('seed-status').textContent = `seeding (slot ${slot}) — keep tab open`;
-    log(`Now seeding "${entry.name}" as slot ${slot} — this tab serves new peers even if the sender leaves.`);
+    $('seed-status').textContent = `seeding (slot ${slot}) - keep tab open`;
+    log(`Now seeding "${entry.name}" as slot ${slot} - this tab serves new peers even if the sender leaves.`);
   } catch (e) { log(`Could not register as seeder: ${e.message}`, true); }
   renderLibrary();
   maybeOfferSite(fileId, entry);
@@ -693,7 +693,7 @@ async function fetchSiteProgressive(conn, fileId, info, pwHash) {
   if (12 + mLen > headLen) throw new Error('manifest larger than head window');
   const manifest = JSON.parse(await head.slice(12, 12 + mLen).text());
   const dataStart = 12 + mLen;
-  log(`Mesh: manifest fetched (${manifest.files.length} assets) — loading per-asset with local dedupe cache.`);
+  log(`Mesh: manifest fetched (${manifest.files.length} assets) - loading per-asset with local dedupe cache.`);
 
   // Priority: entry html, then code/styles, then everything else.
   const prio = p => p === manifest.entry ? 0 : /\.(css|js)$/i.test(p) ? 1 : 2;
@@ -707,7 +707,7 @@ async function fetchSiteProgressive(conn, fileId, info, pwHash) {
       fromCache++;
     } else {
       const b = await rangeFetch(fileId, dataStart + f.offset, dataStart + f.offset + f.size, (got, want) => {
-        $('r-status').textContent = `asset ${done + 1}/${manifest.files.length}: ${f.path} — ${Math.floor(got / want * 100)}%`;
+        $('r-status').textContent = `asset ${done + 1}/${manifest.files.length}: ${f.path} - ${Math.floor(got / want * 100)}%`;
       });
       const digest = await crypto.subtle.digest('SHA-256', await b.arrayBuffer());
       const hex = [...new Uint8Array(digest)].map(x => x.toString(16).padStart(2, '0')).join('');
@@ -730,7 +730,7 @@ async function fetchSiteProgressive(conn, fileId, info, pwHash) {
   return { name: info.fileName, mime: 'application/octet-stream', blob: new Blob(pieces), pwHash };
 }
 
-// ── site bundles (Stage 9B): hash-verified P2P-hosted static sites ─────────
+// ── site bundles: hash-verified P2P-hosted static sites ────────────────────
 
 const SITE_MAGIC = 'MSHARE1\n';
 
@@ -738,7 +738,7 @@ async function maybeOfferSite(fileId, entry) {
   try {
     if (entry.blob.size < 12 || await entry.blob.slice(0, 8).text() !== SITE_MAGIC) return;
   } catch { return; }
-  log('This share is a meshare site — verifying and opening it full-page (sandboxed).');
+  log('This share is a meshare site - verifying and opening it full-page (sandboxed).');
   renderSite(entry).catch(e => {
     // If auto-open fails, fall back to a manual button so nothing is lost.
     log(`Site render failed: ${e.message || e}`, true);
@@ -764,7 +764,7 @@ async function renderSite(entry) {
     const b = blob.slice(dataStart + f.offset, dataStart + f.offset + f.size);
     const digest = await crypto.subtle.digest('SHA-256', await b.arrayBuffer());
     const hex = [...new Uint8Array(digest)].map(x => x.toString(16).padStart(2, '0')).join('');
-    if (hex !== f.sha256) throw new Error(`integrity check FAILED for "${f.path}" — refusing to run tampered content`);
+    if (hex !== f.sha256) throw new Error(`integrity check FAILED for "${f.path}" - refusing to run tampered content`);
     parts.set(f.path, b);
   }
   log(`Site integrity verified: ${manifest.files.length} file${manifest.files.length === 1 ? '' : 's'}, all SHA-256 hashes match.`);
@@ -860,9 +860,9 @@ async function startReceive(fileId) {
     if (info.status !== 'active') {
       $('r-dot').className = 'dot err';
       $('r-status').textContent = info.status === 'revoked'
-        ? 'this link was revoked by its owner — downloads are disabled'
-        : 'this link has expired — downloads are disabled';
-      return log(`Share ${fileId} is ${info.status} — refusing to fetch.`, true);
+        ? 'this link was revoked by its owner - downloads are disabled'
+        : 'this link has expired - downloads are disabled';
+      return log(`Share ${fileId} is ${info.status} - refusing to fetch.`, true);
     }
     if (info.hasPassword) {
       $('r-status').textContent = 'this share is password-protected';
@@ -872,7 +872,7 @@ async function startReceive(fileId) {
   }
 
   await turnLoaded;
-  log(`Fetching file ${fileId} — probing up to ${MESHARE.maxSlots} seeder slots…`);
+  log(`Fetching file ${fileId} - probing up to ${MESHARE.maxSlots} seeder slots…`);
   const peer = new Peer(peerOptions());
   try {
     await new Promise((res, rej) => { peer.on('open', res); peer.on('error', e => { if (!peer.open) rej(new Error(`signaling failed: ${e.type}`)); }); });
@@ -886,8 +886,8 @@ async function startReceive(fileId) {
     log(`Mesh: probing slot ${n} (${sid})…`);
     let conn;
     try { conn = await probeSlot(peer, sid); }
-    catch (e) { log(`Mesh: slot ${n}: ${e.message} — next.`); continue; }
-    log(`Mesh: seeder found at slot ${n} — downloading.`);
+    catch (e) { log(`Mesh: slot ${n}: ${e.message} - next.`); continue; }
+    log(`Mesh: seeder found at slot ${n} - downloading.`);
     const key = 'out-' + conn.peer;
     livePeers.set(key, { peerId: conn.peer, dir: 'out', bytes: 0, path: null });
     renderPeers();
@@ -903,7 +903,7 @@ async function startReceive(fileId) {
           return;
         } catch (e) {
           if (String(e.message).includes('password')) throw e;
-          log(`Progressive site fetch failed (${e.message}) — falling back to classic transfer.`, true);
+          log(`Progressive site fetch failed (${e.message}) - falling back to classic transfer.`, true);
         }
       }
       const entry = await receiveFile(conn, fileId, pwHash, inc => {
@@ -923,23 +923,23 @@ async function startReceive(fileId) {
       try { conn.close(); } catch {}
       if (String(e.message).includes('password')) {
         peer.destroy();
-        log('Wrong password — try again.', true);
+        log('Wrong password - try again.', true);
         $('pw-input').value = '';
         return startReceive(fileId);
       }
-      log(`Download from slot ${n} failed: ${e.message} — trying next seeder.`, true);
+      log(`Download from slot ${n} failed: ${e.message} - trying next seeder.`, true);
     }
   }
   peer.destroy();
 
   // No live seeders anywhere - R2 backup fallback (P2P was tried first).
   if (!info.unknown && info.r2Available) {
-    log('Mesh: no live seeders responded — falling back to R2 backup storage…');
-    $('r-status').textContent = 'no live seeders — downloading from backup storage…';
+    log('Mesh: no live seeders responded - falling back to R2 backup storage…');
+    $('r-status').textContent = 'no live seeders - downloading from backup storage…';
     try {
       const res = await fetch(`${MESHARE.apiBase}/api/shares/${fileId}/blob${pwHash ? `?pw=${pwHash}` : ''}`);
       if (res.status === 403) {
-        log('Wrong password — try again.', true);
+        log('Wrong password - try again.', true);
         $('pw-input').value = '';
         return startReceive(fileId);
       }
@@ -960,7 +960,7 @@ async function startReceive(fileId) {
       }
       if (received !== info.size) throw new Error(`size mismatch: got ${received} of ${info.size} bytes`);
       const entry = { name: info.fileName, mime: info.mime, blob: new Blob(chunks, { type: info.mime }), pwHash };
-      await completeReceive(fileId, entry, pwHash, '☁️ R2 BACKUP FALLBACK — no live seeders were online; this tab now re-seeds it into the mesh');
+      await completeReceive(fileId, entry, pwHash, '☁️ R2 BACKUP FALLBACK - no live seeders were online; this tab now re-seeds it into the mesh');
       return;
     } catch (e) {
       $('r-dot').className = 'dot err';
@@ -970,7 +970,7 @@ async function startReceive(fileId) {
   }
 
   $('r-dot').className = 'dot err';
-  $('r-status').textContent = 'no seeders online — this file is currently unavailable';
+  $('r-status').textContent = 'no seeders online - this file is currently unavailable';
   if (info.unknown) $('r-name').textContent = `file ${fileId}`;
   log(`No reachable seeders for ${fileId} (checked all ${MESHARE.maxSlots} slots)${info.unknown ? '' : ' and no R2 backup exists'}.`, true);
 }
@@ -995,7 +995,7 @@ $('share-btn').onclick = async () => {
       const b = await buildSiteBundleBrowser($('share-folder').files);
       file = new File([b.blob], `${b.siteName}.mshare`, { type: 'application/octet-stream' });
       kind = 'site';
-      log(`Site bundle built in-browser: ${b.fileCount} files, ${(file.size / 1048576).toFixed(2)} MB, entry ${b.entry} — hash-verified on arrival.`);
+      log(`Site bundle built in-browser: ${b.fileCount} files, ${(file.size / 1048576).toFixed(2)} MB, entry ${b.entry} - hash-verified on arrival.`);
     } catch (e) {
       $('share-btn').disabled = false;
       return shareMsg(`Could not bundle folder: ${e.message}`, true);
@@ -1026,10 +1026,10 @@ $('share-btn').onclick = async () => {
     const reg = await res.json();
     fileId = reg.fileId;
     localStorage.setItem(`meshare-token-${fileId}`, reg.ownerToken);
-    log(`Share registered — expires ${new Date(reg.expiresAt).toLocaleString()}; you can revoke it from the library below.`);
+    log(`Share registered - expires ${new Date(reg.expiresAt).toLocaleString()}; you can revoke it from the library below.`);
   } catch (e) {
     fileId = newFileId();
-    log(`Registry unreachable (${e.message || e}) — sharing in legacy mode: no expiry/revocation, P2P only.`, true);
+    log(`Registry unreachable (${e.message || e}) - sharing in legacy mode: no expiry/revocation, P2P only.`, true);
   }
   store.set(fileId, { name: file.name, mime: file.type, blob: file });
   try {
@@ -1039,9 +1039,9 @@ $('share-btn').onclick = async () => {
     $('share-link').value = link;
     navigator.clipboard.writeText(link).catch(() => {});
     $('seed-dot').className = 'dot on';
-    $('seed-status').textContent = `seeding (slot ${slot}) — keep tab open`;
+    $('seed-status').textContent = `seeding (slot ${slot}) - keep tab open`;
     log(`Sharing "${file.name}" as ${fileId} (slot ${slot}). Link copied: ${link}`);
-    shareMsg('Link copied — send it to anyone. Keep this tab open to keep sharing.');
+    shareMsg('Link copied - send it to anyone. Keep this tab open to keep sharing.');
     persistToCache(fileId, store.get(fileId));
   } catch (e) {
     store.delete(fileId);
@@ -1056,7 +1056,7 @@ $('copy-btn').onclick = () => navigator.clipboard.writeText($('share-link').valu
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js')
     .then(() => navigator.serviceWorker.ready)
-    .then(() => log('Service worker active — app shell loads offline; installable as an app.'))
+    .then(() => log('Service worker active - app shell loads offline; installable as an app.'))
     .catch(e => log(`Service worker failed: ${e.message || e}`, true));
 }
 
@@ -1092,12 +1092,12 @@ const fileId = location.hash.slice(1).trim().toLowerCase();
     $('r-pct').textContent = '100';
     $('r-progress').value = 1;
     $('r-dot').className = 'dot on';
-    $('r-status').textContent = 'restored from this device’s cache — instant, no download';
+    $('r-status').textContent = 'restored from this device’s cache - instant, no download';
     const save = $('save-btn');
     save.href = URL.createObjectURL(entry.blob);
     save.download = entry.name;
     save.hidden = false;
-    log(`File ${fileId} ("${entry.name}") already cached on this device — served instantly, re-seeding.`);
+    log(`File ${fileId} ("${entry.name}") already cached on this device - served instantly, re-seeding.`);
     maybeOfferSite(fileId, entry);
   } else if (fileId) {
     startReceive(fileId);

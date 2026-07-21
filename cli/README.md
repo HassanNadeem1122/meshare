@@ -6,7 +6,7 @@ P2P file sharing where every downloader becomes a server.
 npx meshare ./photo.jpg
 ```
 
-You get a link and a QR code (link is auto-copied). Anyone who opens the link downloads the file straight from you over WebRTC — nothing to install — and their browser tab immediately starts seeding it to the next person. Close your terminal: as long as any recipient still has the page open (or reopens it later — files are cached), the file stays alive.
+You get a link and a QR code (link is auto-copied). Anyone who opens the link downloads the file straight from you over WebRTC - nothing to install - and their browser tab immediately starts seeding it to the next person. Close your terminal: as long as any recipient still has the page open (or reopens it later - files are cached), the file stays alive.
 
 ## Usage
 
@@ -30,7 +30,7 @@ Other flags: `--no-open` (don't auto-open the seeder tab), `--port N`, `--backup
 ## Honest limitations
 
 - A fully closed browser tab cannot seed (browser platform constraint). Reopening re-seeds instantly from local cache.
-- If every seeder is offline at once, the file is unavailable until one returns — backup storage is planned.
+- If every seeder is offline at once, the file is unavailable until one returns - backup storage is planned.
 - Signaling currently uses PeerJS's free public server (no uptime SLA).
 
 Full docs: https://github.com/HassanNadeem1122/meshare

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // meshare CLI: `meshare <file>` -> shareable link + QR + live seeder terminal.
-// Stage 7: --name/--expires/--password, R2 backup upload, `meshare revoke <id>`.
-// Node has no WebRTC, so the CLI opens a local seeder page in the browser;
-// that tab does the actual P2P serving and reports back here.
+// Supports --name/--expires/--password, optional R2 backup upload, and
+// `meshare revoke <id>`. Node has no WebRTC, so the CLI opens a local
+// seeder page in the browser; that tab does the actual P2P serving and
+// reports back here.
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -63,7 +64,7 @@ function buildSiteBundle(folderAbs) {
     datas.push(buf);
     offset += buf.length;
     if (offset > SITE_MAX_BYTES) {
-      console.error(RED(`meshare: site exceeds ${SITE_MAX_BYTES / 1048576} MB — keep bundles small (this is v1; chunk-lazy loading is on the roadmap)`));
+      console.error(RED(`meshare: site exceeds ${SITE_MAX_BYTES / 1048576} MB - keep bundles small (this is v1; chunk-lazy loading is on the roadmap)`));
       process.exit(1);
     }
   }
@@ -104,14 +105,14 @@ if (positional[0] === 'revoke') {
   if (!id) usage(1);
   const record = loadTokens()[id];
   if (!record) {
-    console.error(RED(`no owner token stored for "${id}" — this machine didn't create that share (tokens live in ${TOKEN_STORE}).`));
+    console.error(RED(`no owner token stored for "${id}" - this machine didn't create that share (tokens live in ${TOKEN_STORE}).`));
     process.exit(1);
   }
   fetch(`${APP_URL}/api/shares/${id}`, { method: 'DELETE', headers: { 'X-Owner-Token': record.token } })
     .then(async res => {
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-      console.log(LIME(`✔ revoked ${id}`) + DIM(' — new downloads disabled, R2 backup deleted. Copies already downloaded cannot be recalled.'));
+      console.log(LIME(`✔ revoked ${id}`) + DIM(' - new downloads disabled, R2 backup deleted. Copies already downloaded cannot be recalled.'));
     })
     .catch(e => { console.error(RED(`revoke failed: ${e.message}`)); process.exit(1); });
   return;
@@ -129,7 +130,7 @@ if (positional[0] === 'site') {
   if (!fstat.isDirectory()) { console.error(RED(`meshare: not a folder: ${folderAbs}`)); process.exit(1); }
   siteInfo = buildSiteBundle(folderAbs);
   filePath = siteInfo.tmp;
-  console.log(DIM(`  site bundle: ${siteInfo.fileCount} files, ${(siteInfo.totalBytes / 1048576).toFixed(2)} MB, entry ${siteInfo.entry} — hash-verified on arrival`));
+  console.log(DIM(`  site bundle: ${siteInfo.fileCount} files, ${(siteInfo.totalBytes / 1048576).toFixed(2)} MB, entry ${siteInfo.entry} - hash-verified on arrival`));
 }
 if (!filePath) usage(1);
 const absPath = path.resolve(filePath);
@@ -178,7 +179,7 @@ async function uploadBackup(fileId, ownerToken) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-    console.log(LIME('  ☁ backup uploaded to R2') + DIM(' — the file stays downloadable even with zero live seeders.'));
+    console.log(LIME('  ☁ backup uploaded to R2') + DIM(' - the file stays downloadable even with zero live seeders.'));
   } catch (e) {
     console.error(RED(`  ✖ R2 backup FAILED: ${e.message}`));
     console.error(RED('    the share still works peer-to-peer, but it will NOT survive all seeders going offline.'));
@@ -220,7 +221,7 @@ function onStatus(s) {
   lastStatus = { ...s, at: Date.now() };
   const line = s.state === 'seeding'
     ? `● seeding (slot ${s.slot}) · ${BOLD(String(s.peers))} peer${s.peers === 1 ? '' : 's'} connected · ${BOLD(String(s.transfers))} transfer${s.transfers === 1 ? '' : 's'} completed`
-    : s.state === 'revoked' || s.state === 'expired' ? `✖ share is ${s.state} — seeder stopped`
+    : s.state === 'revoked' || s.state === 'expired' ? `✖ share is ${s.state} - seeder stopped`
     : s.state === 'error' ? `✖ seeder error: ${s.message}`
     : `○ ${s.state}…`;
   if (!prev || prev.state !== s.state || prev.peers !== s.peers || prev.transfers !== s.transfers) {
@@ -251,10 +252,10 @@ function openBrowser(url) {
     reg = await registerShare();
   } catch (e) {
     if (flags.name || flags.id) {
-      console.error(RED(`✖ could not register the custom name (registry error: ${e.message}). Not sharing under an unreserved name — try again or drop --name.`));
+      console.error(RED(`✖ could not register the custom name (registry error: ${e.message}). Not sharing under an unreserved name - try again or drop --name.`));
       process.exit(1);
     }
-    console.error(RED(`registry unreachable (${e.message}) — sharing in legacy mode: random ID, no expiry/revocation/backup.`));
+    console.error(RED(`registry unreachable (${e.message}) - sharing in legacy mode: random ID, no expiry/revocation/backup.`));
     const ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
     reg = {
       fileId: Array.from(crypto.randomBytes(8), b => ALPHABET[b % ALPHABET.length]).join(''),
@@ -283,7 +284,7 @@ function openBrowser(url) {
     if (reg.expiresAt) console.log(`  ${DIM(`expires ${new Date(reg.expiresAt).toLocaleString()} · revoke anytime: meshare revoke ${fileId}`)}`);
     console.log('');
     qrcode.generate(link, { small: true }, q => console.log(q.replace(/^/gm, '  ')));
-    console.log(`  ${DIM('keep this running — the browser tab it opens is the seeder.')}`);
+    console.log(`  ${DIM('keep this running - the browser tab it opens is the seeder.')}`);
     console.log('');
     copyToClipboard(link);
     if (reg.ownerToken && flags.backup) uploadBackup(fileId, reg.ownerToken);

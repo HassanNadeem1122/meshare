@@ -1,6 +1,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>meshare live — disposable rooms</title>
+<title>meshare live - disposable rooms</title>
 <meta name="theme-color" content="#f3f3ee">
 <link rel="icon" href="icon-192.png" type="image/png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
@@ -64,7 +64,7 @@
     <div class="card hero">
       <div class="stripe"></div>
       <div class="label">disposable room</div>
-      <p style="font-size:14px;margin:6px 0 12px">Pick a room name, send the link — everyone in it connects <b>directly, peer-to-peer</b>. Live presence and chat while people are here. When the last person leaves, the room is gone. No account, no server storing a byte.</p>
+      <p style="font-size:14px;margin:6px 0 12px">Pick a room name, send the link - everyone in it connects <b>directly, peer-to-peer</b>. Live presence and chat while people are here. When the last person leaves, the room is gone. No account, no server storing a byte.</p>
       <input id="room-input" placeholder="room name (e.g. team-standup)" autocomplete="off" maxlength="40">
       <input id="name-input" placeholder="your name" autocomplete="off" maxlength="24">
       <p style="margin-bottom:0"><button class="btn" id="join-btn">Join room</button></p>
@@ -73,7 +73,7 @@
 
   <section id="room-view" hidden>
     <div class="card hero" style="padding:16px 22px">
-      <div class="label">invite anyone — send this link</div>
+      <div class="label">invite anyone - send this link</div>
       <div class="link-box" style="margin-top:8px">
         <input id="room-link" readonly>
         <button class="btn ghost" id="copy-btn" style="padding:8px 18px;font-size:13px">Copy</button>
@@ -116,7 +116,7 @@ async function loadTurn() {
     const turn = (data.iceServers || []).filter(s => [].concat(s.urls).some(u => /^turns?:/i.test(u)));
     MESHARE.iceServers = MESHARE.iceServers.concat(turn);
     log(`TURN: ${turn.length} relay entries loaded.`);
-  } catch (e) { log(`TURN unavailable (${e.message}) — direct only.`, true); }
+  } catch (e) { log(`TURN unavailable (${e.message}) - direct only.`, true); }
 }
 
 const seatName = (room, n) => `meshare-room-${room}-${n}`;
@@ -134,7 +134,7 @@ setInterval(() => {
   const now = Date.now();
   for (const [id, conn] of conns) {
     if (now - (lastSeen.get(id) || now) > 15000) {
-      log(`Peer ${id.slice(-12)} silent >15s — dropping as gone.`);
+      log(`Peer ${id.slice(-12)} silent >15s - dropping as gone.`);
       try { conn.close(); } catch {}
       dropPeer(id);
     } else {
@@ -247,7 +247,7 @@ async function joinRoom() {
     peer.on('connection', c => wireConn(c));
     peer.on('disconnected', () => { if (!peer.destroyed) peer.reconnect(); });
     $('msg-input').disabled = false; $('send-btn').disabled = false; $('msg-input').focus();
-    addMsg('', `you joined "${roomId}" — this room disappears when everyone leaves`, 'sys');
+    addMsg('', `you joined "${roomId}" - this room disappears when everyone leaves`, 'sys');
   } catch (e) {
     $('net-dot').className = 'dot err';
     setStatus('could not join: ' + (e.message || e));

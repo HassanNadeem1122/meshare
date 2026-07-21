@@ -9,7 +9,7 @@ const CORS = {
   'Access-Control-Allow-Headers': 'Content-Type, X-Owner-Token'
 };
 
-// Durable, cross-isolate rate limiting (Stage 8). One DO instance per
+// Durable, cross-isolate rate limiting. One DO instance per
 // route+IP; each stores a single fixed-window counter, so idle objects
 // cost nothing and there's no cleanup to run.
 export class RateLimiter {

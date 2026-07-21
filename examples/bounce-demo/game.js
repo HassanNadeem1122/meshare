@@ -58,7 +58,7 @@ function endRound() {
   $('best').textContent = best;
   $('ov-title').textContent = `SCORE ${score}`;
   $('ov-sub').textContent = score >= best && score > 0
-    ? 'session best — one more?' : 'faster fingers next time';
+    ? 'session best - one more?' : 'faster fingers next time';
   $('start').textContent = '↻  play again';
   $('overlay').classList.remove('hidden');
 }

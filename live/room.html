@@ -1,6 +1,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>meshare live — room</title>
+<title>meshare live - room</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
 <style>
   :root { --bg:#0f1012; --card:#17181b; --card-2:#1d1f23; --line:#26282d; --lime:#d9f24b; --text:#f2f2f0; --muted:#8b8e94; --danger:#ff6b5e; }
@@ -49,7 +49,7 @@
   <section id="join-view" class="join">
     <div class="card">
       <div class="label">join an ephemeral room</div>
-      <p style="color:var(--muted);font-size:14px">Everyone with the same room name connects directly, peer-to-peer. Presence and chat are live while people are here — and gone when the last person leaves. No server stores anything.</p>
+      <p style="color:var(--muted);font-size:14px">Everyone with the same room name connects directly, peer-to-peer. Presence and chat are live while people are here - and gone when the last person leaves. No server stores anything.</p>
       <input id="room-input" placeholder="room name (e.g. team-standup)" autocomplete="off">
       <input id="name-input" placeholder="your name" autocomplete="off">
       <p><button class="btn" id="join-btn">Join room</button></p>
@@ -94,7 +94,7 @@ async function loadTurn() {
     const turn = (data.iceServers || []).filter(s => [].concat(s.urls).some(u => /^turns?:/i.test(u)));
     MESHARE.iceServers = MESHARE.iceServers.concat(turn);
     log(`TURN: ${turn.length} relay entries loaded.`);
-  } catch (e) { log(`TURN unavailable (${e.message}) — direct only.`, true); }
+  } catch (e) { log(`TURN unavailable (${e.message}) - direct only.`, true); }
 }
 
 const seatName = (room, n) => `meshare-room-${room}-${n}`;

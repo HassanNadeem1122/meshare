@@ -1,7 +1,7 @@
 {
   "name": "meshare",
-  "version": "1.0.1",
-  "description": "P2P file sharing where every downloader becomes a server. One command → link + QR code; recipients need nothing installed.",
+  "version": "1.0.2",
+  "description": "P2P file sharing where every downloader becomes a server. One command gives you a link and QR code; recipients need nothing installed.",
   "bin": {
     "meshare": "cli.js"
   },

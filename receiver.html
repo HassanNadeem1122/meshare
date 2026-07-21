@@ -1,6 +1,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>meshare — Client B (receiver)</title>
+<title>meshare - Client B (receiver)</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
 <style>
   body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
@@ -33,7 +33,7 @@
 <div id="log"></div>
 
 <script>
-// ── Stage 4 config ─────────────────────────────────────────────────────────
+// ── config ─────────────────────────────────────────────────────────────────
 // TURN credentials are NOT hardcoded here anymore. They are fetched at page
 // load from the meshare-auth credential server, which keeps the Metered.ca
 // secret key server-side and hands the browser only short-lived credentials.
@@ -77,8 +77,8 @@ const hasTurn = () =>
 function showTurnStatus() {
   $('turn-status').textContent =
     window.MESHARE.turnState === 'loading' ? 'TURN relay: fetching short-lived credentials…'
-    : hasTurn() ? 'TURN relay: short-lived credentials fetched — strict-NAT senders can reach this peer via relay.'
-    : 'TURN relay: UNAVAILABLE (credential server unreachable) — direct P2P only; strict-NAT networks will time out.';
+    : hasTurn() ? 'TURN relay: short-lived credentials fetched - strict-NAT senders can reach this peer via relay.'
+    : 'TURN relay: UNAVAILABLE (credential server unreachable) - direct P2P only; strict-NAT networks will time out.';
 }
 showTurnStatus();
 
@@ -99,11 +99,11 @@ async function loadTurnCredentials() {
       showTurnStatus();
       return;
     } catch (e) {
-      log(`TURN: ${url} failed (${e.message || e}) — trying next source…`, true);
+      log(`TURN: ${url} failed (${e.message || e}) - trying next source…`, true);
     }
   }
   window.MESHARE.turnState = 'unavailable';
-  log('WARNING: no TURN credential source reachable. Continuing with STUN only — direct connections still work, but strict-NAT relay fallback is DISABLED.', true);
+  log('WARNING: no TURN credential source reachable. Continuing with STUN only - direct connections still work, but strict-NAT relay fallback is DISABLED.', true);
   showTurnStatus();
 }
 
@@ -141,7 +141,7 @@ async function logPath(c) {
   const l = stats.get(pair.localCandidateId) || {};
   const r = stats.get(pair.remoteCandidateId) || {};
   const viaRelay = l.candidateType === 'relay' || r.candidateType === 'relay';
-  log(`Connection path: ${viaRelay ? '🔁 TURN RELAY' : '⚡ DIRECT P2P'} — local candidate "${l.candidateType}"${l.candidateType === 'relay' ? ` (relay protocol: ${l.relayProtocol || '?'})` : ''}, remote candidate "${r.candidateType}".`);
+  log(`Connection path: ${viaRelay ? '🔁 TURN RELAY' : '⚡ DIRECT P2P'} - local candidate "${l.candidateType}"${l.candidateType === 'relay' ? ` (relay protocol: ${l.relayProtocol || '?'})` : ''}, remote candidate "${r.candidateType}".`);
 }
 
 let peer = null;
@@ -153,7 +153,7 @@ peer = new Peer({ debug: 2, config: { iceServers: window.MESHARE.iceServers } })
 
 peer.on('open', id => {
   log(`Signaling connected. My peer ID: ${id}`);
-  setStatus('Ready — waiting for a sender to connect.');
+  setStatus('Ready - waiting for a sender to connect.');
   $('my-id').textContent = id;
   $('copy-btn').hidden = false;
 });
@@ -169,8 +169,8 @@ peer.on('error', err => {
   fail(`Peer error (${err.type || 'unknown'}): ${err.message || err}`);
 });
 
-// Incoming transfer state. Protocol (Stage 4): {type:'meta'} → receiver replies
-// {type:'ready', mode} once a save mode is chosen → binary chunks → {type:'done'}.
+// Incoming transfer state. Protocol: {type:'meta'} then receiver replies
+// {type:'ready', mode} once a save mode is chosen, then binary chunks, then {type:'done'}.
 // Text still arrives as a single {type:'text'} message.
 let incoming = null;
 let activeConn = null;
@@ -184,11 +184,11 @@ $('save-stream-btn').onclick = async () => {
     incoming.writable = await handle.createWritable();
     incoming.mode = 'disk';
     $('save-choice').hidden = true;
-    log(`Streaming mode: chunks will be written straight to "${handle.name}" on disk — memory stays flat no matter how large the file is.`);
+    log(`Streaming mode: chunks will be written straight to "${handle.name}" on disk - memory stays flat no matter how large the file is.`);
     setStatus(`Receiving "${incoming.name}" (streaming to disk)…`);
     activeConn.send({ type: 'ready', mode: 'disk-streaming' });
   } catch (e) {
-    if (e.name === 'AbortError') log('Save dialog dismissed — choose again (the sender is waiting, up to 120s).', true);
+    if (e.name === 'AbortError') log('Save dialog dismissed - choose again (the sender is waiting, up to 120s).', true);
     else fail(`Could not open save location: ${e.message || e}`);
   }
 };
@@ -210,7 +210,7 @@ peer.on('connection', conn => {
 
   conn.on('open', () => {
     log('Data channel open.');
-    setStatus(`Connected to ${conn.peer} — waiting for data.`);
+    setStatus(`Connected to ${conn.peer} - waiting for data.`);
     logPath(conn);
   });
 
@@ -232,15 +232,15 @@ peer.on('connection', conn => {
         $('progress').value = 0;
         const fsaAvailable = 'showSaveFilePicker' in window && isSecureContext;
         if (fsaAvailable) {
-          log('This browser supports the File System Access API — choose where to save and the file will stream straight to disk.');
-          setStatus(`"${data.name}" incoming — choose a save mode to start.`);
+          log('This browser supports the File System Access API - choose where to save and the file will stream straight to disk.');
+          setStatus(`"${data.name}" incoming - choose a save mode to start.`);
           $('save-choice').hidden = false;
         } else {
           incoming.mode = 'memory';
           const why = 'showSaveFilePicker' in window
             ? 'page is not a secure context (use localhost, file://, or HTTPS)'
             : 'browser does not support it (e.g. Firefox/Safari)';
-          log(`File System Access API unavailable — ${why}. Falling back to IN-MEMORY receive: fine for small files, multi-GB files can crash the tab.`, true);
+          log(`File System Access API unavailable - ${why}. Falling back to IN-MEMORY receive: fine for small files, multi-GB files can crash the tab.`, true);
           setStatus(`Receiving "${data.name}" (in memory)…`);
           conn.send({ type: 'ready', mode: 'memory' });
         }
@@ -267,7 +267,7 @@ peer.on('connection', conn => {
           link.textContent = `Save "${incoming.name}" (${incoming.size} bytes)`;
           link.style.display = 'inline';
           log(`Transfer complete: "${incoming.name}", ${incoming.received}/${incoming.size} bytes verified (in memory).`);
-          setStatus(`Received "${incoming.name}" — click the link to save it.`, 'ok');
+          setStatus(`Received "${incoming.name}" - click the link to save it.`, 'ok');
         }
         conn.send({ type: 'ack', message: `received "${incoming.name}" (${incoming.received} bytes) OK, mode: ${incoming.mode}` });
         return;
