@@ -1,0 +1,177 @@
+<title>meshare, in plain English</title>
+<meta name="description" content="What meshare actually does and how it works, explained simply.">
+<style>
+  :root {
+    --paper: #f5f7f7;
+    --paper-raised: #ffffff;
+    --ink: #142027;
+    --ink-dim: #526069;
+    --ink-faint: #7c8b91;
+    --line: #dce3e4;
+    --line-strong: #c3ced0;
+    --teal: #0e7c86;
+    --teal-soft: #e3f0f1;
+    --amber: #ad6e0c;
+    --amber-soft: #f7ecd9;
+    --code-bg: #eef2f2;
+    --shadow: 0 1px 2px rgba(20,32,39,.04), 0 8px 24px rgba(20,32,39,.06);
+    --serif: "Iowan Old Style", Charter, "Georgia", "Times New Roman", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0f1517; --paper-raised: #161f21; --ink: #e7eeee; --ink-dim: #9db0b5;
+      --ink-faint: #6d8085; --line: #263133; --line-strong: #33403f; --teal: #4bc7d1;
+      --teal-soft: #16292b; --amber: #e0a23d; --amber-soft: #2a2213; --code-bg: #121a1c;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.4);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0f1517; --paper-raised: #161f21; --ink: #e7eeee; --ink-dim: #9db0b5;
+    --ink-faint: #6d8085; --line: #263133; --line-strong: #33403f; --teal: #4bc7d1;
+    --teal-soft: #16292b; --amber: #e0a23d; --amber-soft: #2a2213; --code-bg: #121a1c;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.4);
+  }
+  :root[data-theme="light"] {
+    --paper: #f5f7f7; --paper-raised: #ffffff; --ink: #142027; --ink-dim: #526069;
+    --ink-faint: #7c8b91; --line: #dce3e4; --line-strong: #c3ced0; --teal: #0e7c86;
+    --teal-soft: #e3f0f1; --amber: #ad6e0c; --amber-soft: #f7ecd9; --code-bg: #eef2f2;
+    --shadow: 0 1px 2px rgba(20,32,39,.04), 0 8px 24px rgba(20,32,39,.06);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--serif); font-size: 18px; line-height: 1.7;
+  }
+  ::selection { background: var(--teal-soft); color: var(--ink); }
+  a { color: var(--teal); }
+
+  main { max-width: 62ch; margin: 0 auto; padding: 56px 24px 100px; }
+
+  .eyebrow {
+    font-family: var(--sans); font-size: .72rem; font-weight: 700; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--teal); margin-bottom: 12px;
+  }
+  h1 { font-size: clamp(1.9rem, 5vw, 2.6rem); line-height: 1.15; margin: 0 0 18px; }
+  p.dek { font-family: var(--sans); color: var(--ink-dim); font-size: 1.08rem; margin: 0 0 44px; }
+
+  h2 { font-size: 1.4rem; margin: 52px 0 16px; }
+  h2 .num { font-family: var(--mono); color: var(--teal); font-size: .85em; margin-right: 10px; }
+  p { margin: 0 0 18px; }
+  ul { margin: 0 0 18px; padding-left: 1.3em; }
+  li { margin-bottom: 8px; }
+  b { color: var(--ink); }
+
+  .box {
+    font-family: var(--sans); background: var(--teal-soft); border: 1px solid color-mix(in srgb, var(--teal) 28%, transparent);
+    border-radius: 12px; padding: 18px 20px; margin: 24px 0; font-size: .95rem;
+  }
+  .box b { color: var(--teal); }
+
+  figure { margin: 28px 0; padding: 20px; background: var(--paper-raised); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); overflow-x: auto; }
+  figure svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+  figcaption { font-family: var(--sans); font-size: .78rem; color: var(--ink-faint); margin-top: 12px; text-align: center; }
+  .dtext { font-family: var(--sans); }
+
+  dl { font-family: var(--sans); margin: 0; }
+  dl div { padding: 14px 0; border-bottom: 1px solid var(--line); }
+  dl div:last-child { border-bottom: none; }
+  dt { font-weight: 700; color: var(--ink); margin-bottom: 4px; }
+  dd { margin: 0; color: var(--ink-dim); font-size: .95rem; }
+
+  .backlink { font-family: var(--sans); font-size: .85rem; margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--line); }
+</style>
+
+<main>
+  <div class="eyebrow">meshare, plainly</div>
+  <h1>What meshare actually does</h1>
+  <p class="dek">No jargon. If a word needs explaining, it gets explained right where it's used.</p>
+
+  <h2><span class="num">1</span>The problem it solves</h2>
+  <p>Normally, when you put a file online for people to download &mdash; a photo, a game, anything &mdash; it sits on <b>one computer</b> (a "server"), usually one you're paying for. Every single person who downloads it costs you a little bit of money and bandwidth. If ten people download it, that's fine. If ten thousand people download it, your bill can suddenly become a real problem &mdash; even though you didn't do anything wrong.</p>
+  <p>meshare avoids this completely. Instead of one server handling every download, <b>every person who downloads the file becomes a new source for the next person.</b> The more popular something gets, the more people there are serving it &mdash; so it never gets slower or more expensive for you.</p>
+
+  <figure>
+    <svg viewBox="0 0 500 190" role="img" aria-label="One server sending to five people, versus six people connected directly to each other.">
+      <text x="110" y="22" text-anchor="middle" class="dtext" style="fill:var(--ink);font-size:13px;font-weight:700">the normal way</text>
+      <circle cx="110" cy="75" r="16" style="fill:var(--teal)" />
+      <text x="110" y="80" text-anchor="middle" class="dtext" style="fill:var(--paper-raised);font-size:9px;font-weight:700">YOU</text>
+      <g style="stroke:var(--line-strong);stroke-width:1.5">
+        <line x1="110" y1="75" x2="35" y2="130" /><line x1="110" y1="75" x2="75" y2="150" />
+        <line x1="110" y1="75" x2="110" y2="155" /><line x1="110" y1="75" x2="145" y2="150" />
+        <line x1="110" y1="75" x2="185" y2="130" />
+      </g>
+      <g style="fill:var(--ink-faint)">
+        <circle cx="35" cy="130" r="8" /><circle cx="75" cy="150" r="8" /><circle cx="110" cy="155" r="8" />
+        <circle cx="145" cy="150" r="8" /><circle cx="185" cy="130" r="8" />
+      </g>
+      <text x="110" y="178" text-anchor="middle" class="dtext" style="fill:var(--ink-faint);font-size:10px">you pay for every single download</text>
+
+      <line x1="280" y1="15" x2="280" y2="180" style="stroke:var(--line)" />
+
+      <text x="405" y="22" text-anchor="middle" class="dtext" style="fill:var(--ink);font-size:13px;font-weight:700">the meshare way</text>
+      <g style="stroke:var(--line-strong);stroke-width:1.5">
+        <line x1="350" y1="65" x2="405" y2="50" /><line x1="350" y1="65" x2="375" y2="115" />
+        <line x1="405" y1="50" x2="460" y2="65" /><line x1="405" y1="50" x2="375" y2="115" />
+        <line x1="460" y1="65" x2="440" y2="115" /><line x1="375" y1="115" x2="440" y2="115" />
+      </g>
+      <g style="fill:var(--teal)">
+        <circle cx="350" cy="65" r="9" /><circle cx="405" cy="50" r="9" /><circle cx="460" cy="65" r="9" />
+        <circle cx="375" cy="115" r="9" /><circle cx="440" cy="115" r="9" />
+      </g>
+      <text x="405" y="178" text-anchor="middle" class="dtext" style="fill:var(--ink-faint);font-size:10px">everyone who downloads it can also serve it</text>
+    </svg>
+    <figcaption>The whole idea, in one picture.</figcaption>
+  </figure>
+
+  <div class="box">
+    <p><b>When you'd actually use this:</b> sending a big video to a friend without fighting email attachment limits. Showing someone a game or demo you built without paying to host it anywhere. Getting a file to someone in the same room without both of you being on the same WiFi. Sharing something once, without creating an account anywhere.</p>
+  </div>
+
+  <h2><span class="num">2</span>How does a file move without a server?</h2>
+  <p>Two browser tabs &mdash; yours and a stranger's &mdash; open a direct connection to each other and send the file straight across, computer to computer. No middleman holds a copy. This ability for two browsers to talk directly is a real, built-in browser feature called <b>WebRTC</b> &mdash; it's the same technology behind things like Google Meet, just repurposed here to send files instead of video.</p>
+  <p>There's one wrinkle: your computer and a stranger's computer usually can't just find each other on the internet directly &mdash; your home router is in the way (this is called <b>NAT</b>, and it's also why your phone doesn't have its own public web address). So the two browsers first ping a small helper service just to say "hey, here's how to reach me" &mdash; and once that quick introduction is done, the helper service steps out completely. From that point on, 100% of the actual file goes directly between the two browsers. (Very occasionally, on a strict office or school network, a fully direct connection isn't possible at all &mdash; meshare then bounces the data through one extra relay step so the transfer still works, instead of just failing.)</p>
+  <p><b>Your files never touch meshare's own servers</b> at any point, either way. meshare runs a tiny bit of bookkeeping &mdash; remembering that a link named <code>my-demo</code> exists and when it expires &mdash; but the actual bytes of your file only ever exist on your computer and the other person's.</p>
+
+  <h2><span class="num">3</span>What happens when you run the command</h2>
+  <ul>
+    <li>You type <code>meshare</code> and point it at a file, or a whole folder (like a small website or game).</li>
+    <li>meshare gives you back a link and a QR code, instantly.</li>
+    <li>You send that link to someone. They click it &mdash; nothing to install, no app, just their normal browser.</li>
+    <li>The file streams directly from your computer to theirs.</li>
+    <li>The moment they finish downloading, <b>their browser can now serve it to the next person too</b> &mdash; even if you close your laptop and go to sleep.</li>
+  </ul>
+  <div class="box">
+    <p><b>The catch, honestly:</b> a file only stays available while at least one browser tab with that file is still open somewhere. If literally everyone closes their tab at the same moment, the file becomes unavailable until someone reopens it. That's just how peer-to-peer sharing works &mdash; there's no server quietly holding a permanent backup unless you explicitly turn one on.</p>
+  </div>
+  <p>By default, a link also quietly expires after 7 days, and you can kill it early yourself (<code>meshare revoke</code>) if you shared something by mistake &mdash; once revoked, that exact link can never be reused by anyone, even you, which stops someone else from reusing an old link to serve something different under your name.</p>
+
+  <h2><span class="num">4</span>The website-hosting trick</h2>
+  <p>meshare can also host a small interactive website or game the exact same way &mdash; <code>meshare site</code> instead of just sharing one file. Before anything runs in the visitor's browser, meshare double-checks every single file against a cryptographic fingerprint (a "hash") to make sure nothing was tampered with in transit. It then runs inside a locked-down browser sandbox that can't see or touch anything else on the visitor's computer.</p>
+  <p>There's also a <b>live chat rooms</b> feature, built the same way: pick a room name, share the link, and everyone who joins talks directly to each other, again with nothing going through a server. The trade-off is that a room only exists while people are actually in it &mdash; there's no chat history sitting around afterward, because nothing was ever saved anywhere.</p>
+
+  <h2><span class="num">5</span>Why it isn't a brand-new idea</h2>
+  <p>Sharing files computer-to-computer instead of through a server is an old idea &mdash; Napster did it in 1999, and BitTorrent (still one of the biggest file-sharing systems in the world) has done it since 2002. What's different about meshare is that it needs <b>zero installation</b> &mdash; older tools like BitTorrent require you to install a separate app. meshare works inside a normal browser tab that anyone can just click open.</p>
+
+  <h2><span class="num">6</span>A few honest limits</h2>
+  <ul>
+    <li><b>Closing your tab stops your computer from sharing.</b> That's a rule of how browsers work, not something meshare can fix.</li>
+    <li><b>A password on a share isn't the same as encryption.</b> It stops casual snooping, but it's not bank-grade security.</li>
+    <li><b>The "please connect these two browsers" helper service is a free, shared one</b> with no guaranteed uptime &mdash; it's been reliable, but it's out of meshare's direct control.</li>
+  </ul>
+
+  <h2><span class="num">7</span>Quick glossary</h2>
+  <dl>
+    <div><dt>Peer-to-peer (P2P)</dt><dd>Computers talking directly to each other, instead of through a central server.</dd></div>
+    <div><dt>WebRTC</dt><dd>The browser feature that lets two browsers connect directly and exchange data.</dd></div>
+    <div><dt>NAT</dt><dd>The reason your home router hides your computer's real address from the internet &mdash; the thing that makes direct connections tricky.</dd></div>
+    <div><dt>Hash / fingerprint</dt><dd>A short code generated from a file's contents, used to check nothing was changed or corrupted.</dd></div>
+    <div><dt>Sandbox</dt><dd>A locked box a website runs inside that stops it from touching anything else on your computer.</dd></div>
+    <div><dt>Relay</dt><dd>A fallback middle step used only when two computers truly can't connect directly &mdash; still just passing your data along, not storing it.</dd></div>
+    <div><dt>Revoke</dt><dd>Permanently killing a link so it can never work again, for anyone &mdash; used when you shared something by mistake.</dd></div>
+  </dl>
+
+  <p class="backlink"><a href="/">&larr; back to meshare</a></p>
+</main>

@@ -4,6 +4,7 @@
 <meta name="theme-color" content="#f3f3ee">
 <link rel="icon" href="icon-192.png" type="image/png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<script src="heartbeat-detector.js"></script>
 <style>
   :root {
     --bg: #f3f3ee; --card: #ffffff; --card-2: #f0f0e8; --line: #e4e4da;
@@ -122,8 +123,32 @@ async function loadTurn() {
 const seatName = (room, n) => `meshare-room-${room}-${n}`;
 let myName = 'anon', roomId = null, mySeat = null, peer = null;
 const conns = new Map();     // remotePeerId -> DataConnection
-const roster = new Map();    // remotePeerId -> displayName
-const lastSeen = new Map();  // remotePeerId -> ms timestamp of last data
+const roster = new Map();       // remotePeerId -> displayName, TRUSTED peers only
+const lastSeen = new Map();     // remotePeerId -> ms timestamp of last data (drives fast-drop)
+const pendingName = new Map();  // remotePeerId -> displayName, received but not yet trusted
+
+// Asymmetric trust: bad news (a peer going silent) is announced instantly -
+// see the silence check below, unchanged. Good news (a peer connecting or
+// reconnecting) is filtered: nothing is announced to the room until the
+// peer survives STABILIZE_COUNT consecutive heartbeats, so a flapping
+// connection (wifi handoff, laptop waking/sleeping) doesn't spam the chat
+// with join/leave noise for a peer that was never really there. See
+// heartbeat-detector.js and heartbeat-detector.test.js for the reasoning
+// and a simulated comparison against the old symmetric (trust-on-connect)
+// behavior.
+const detector = new MeshareHeartbeat.AsymmetricDetector(({ type, peerId }) => {
+  if (type === 'joined') {
+    const name = pendingName.get(peerId) || 'someone';
+    roster.set(peerId, name);
+    renderRoster();
+    addMsg('', `${name} joined`, 'sys');
+  } else if (type === 'left') {
+    const name = roster.get(peerId);
+    roster.delete(peerId);
+    renderRoster();
+    if (name) addMsg('', `${name} left`, 'sys');
+  }
+});
 
 // Heartbeat: a killed tab / dropped network never fires 'close', which would
 // leave a ghost member in the roster. Ping every 5s; silence >15s = gone.
@@ -153,10 +178,9 @@ setInterval(() => {
 }, 5000);
 
 function dropPeer(id) {
-  if (!conns.has(id) && !roster.has(id)) return;
-  const name = roster.get(id);
-  conns.delete(id); roster.delete(id); lastSeen.delete(id); renderRoster();
-  if (name) addMsg('', `${name} left`, 'sys');
+  if (!conns.has(id) && !pendingName.has(id) && !roster.has(id)) return;
+  conns.delete(id); lastSeen.delete(id); pendingName.delete(id);
+  detector.onDisconnect(id, Date.now()); // announces 'left' only if this peer was ever announced 'joined'
 }
 
 function renderRoster() {
@@ -185,16 +209,18 @@ function wireConn(conn) {
     conns.set(conn.peer, conn);
     lastSeen.set(conn.peer, Date.now());
     conn.send({ t: 'hello', name: myName });
+    detector.onConnect(conn.peer, Date.now());
     log(`Connected to ${conn.peer.slice(-12)} (${conns.size} peer link${conns.size === 1 ? '' : 's'}).`);
   });
   conn.on('data', d => {
     lastSeen.set(conn.peer, Date.now());
+    detector.onData(conn.peer, Date.now());
     if (!d || typeof d !== 'object') return;
     if (d.t === 'hello') {
-      if (!roster.has(conn.peer)) addMsg('', `${d.name} joined`, 'sys');
-      roster.set(conn.peer, d.name); renderRoster();
+      pendingName.set(conn.peer, d.name);
+      if (roster.has(conn.peer)) { roster.set(conn.peer, d.name); renderRoster(); } // already trusted - just refresh the name
     } else if (d.t === 'chat') {
-      addMsg(roster.get(conn.peer) || d.name || 'someone', d.text);
+      addMsg(roster.get(conn.peer) || pendingName.get(conn.peer) || 'someone', d.text);
     }
   });
   conn.on('close', () => {

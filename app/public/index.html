@@ -804,7 +804,7 @@ async function renderSite(entry) {
   const html = substitute(await parts.get(manifest.entry).text());
 
   $('site-frame').srcdoc = html;
-  $('site-label').textContent = `· ${manifest.entry} · ${manifest.files.length} files · hash-verified · hosted P2P`;
+  $('site-label').textContent = `· ${manifest.entry} · ${manifest.files.length} file${manifest.files.length === 1 ? '' : 's'} · hash-verified · hosted P2P`;
   $('site-view').hidden = false;
   document.documentElement.style.overflow = 'hidden';  // edge-to-edge: drop the page scrollbar
   $('site-close').onclick = () => { $('site-view').hidden = true; $('site-frame').srcdoc = ''; document.documentElement.style.overflow = ''; };

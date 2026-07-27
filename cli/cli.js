@@ -12,6 +12,13 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const qrcode = require('qrcode-terminal');
 
+// Without this, piping meshare's output into anything that closes early
+// (e.g. `meshare <file> | head`) crashes the process on the next stdout
+// write - Node treats an unhandled EPIPE as an uncaught exception, killing
+// the seeder mid-share instead of just continuing to run headless.
+process.stdout.on('error', err => { if (err.code === 'EPIPE') process.exit(0); });
+process.stderr.on('error', err => { if (err.code === 'EPIPE') process.exit(0); });
+
 const APP_URL = 'https://meshare.meshareapp.workers.dev';
 const TOKEN_STORE = path.join(os.homedir(), '.meshare', 'shares.json');
 
