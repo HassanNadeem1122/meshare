@@ -122,20 +122,19 @@ async function loadTurn() {
 
 const seatName = (room, n) => `meshare-room-${room}-${n}`;
 let myName = 'anon', roomId = null, mySeat = null, peer = null;
-const conns = new Map();     // remotePeerId -> DataConnection
-const roster = new Map();       // remotePeerId -> displayName, TRUSTED peers only
-const lastSeen = new Map();     // remotePeerId -> ms timestamp of last data (drives fast-drop)
-const pendingName = new Map();  // remotePeerId -> displayName, received but not yet trusted
+const conns = new Map();        // remotePeerId -> DataConnection
+const roster = new Map();       // remotePeerId -> displayName, announced peers only
+const pendingName = new Map();  // remotePeerId -> displayName, connected but not yet announced
 
-// Asymmetric trust: bad news (a peer going silent) is announced instantly -
-// see the silence check below, unchanged. Good news (a peer connecting or
-// reconnecting) is filtered: nothing is announced to the room until the
-// peer survives STABILIZE_COUNT consecutive heartbeats, so a flapping
-// connection (wifi handoff, laptop waking/sleeping) doesn't spam the chat
-// with join/leave noise for a peer that was never really there. See
-// heartbeat-detector.js and heartbeat-detector.test.js for the reasoning
-// and a simulated comparison against the old symmetric (trust-on-connect)
-// behavior.
+// Asymmetric trust: bad news (a peer going silent) is acted on instantly -
+// see the silence sweep below. Good news (a peer connecting or reconnecting)
+// is filtered: the "X joined" line waits until the peer has actually stayed
+// up, so a flapping connection (wifi handoff, laptop sleeping) can't spam
+// the room with join/leave noise. Only the chat announcement is delayed -
+// the member list shows the peer immediately, marked as still connecting,
+// because hiding a peer you can already receive messages from would be a
+// lie. See heartbeat-detector.js and its tests for the comparison against
+// the original trust-on-connect behavior.
 const detector = new MeshareHeartbeat.AsymmetricDetector(({ type, peerId }) => {
   if (type === 'joined') {
     const name = pendingName.get(peerId) || 'someone';
@@ -157,8 +156,9 @@ const detector = new MeshareHeartbeat.AsymmetricDetector(({ type, peerId }) => {
 const lastTry = new Map();   // seatId -> ms timestamp of last connect attempt
 setInterval(() => {
   const now = Date.now();
+  const silent = new Set(detector.silentPeers(now));
   for (const [id, conn] of conns) {
-    if (now - (lastSeen.get(id) || now) > 15000) {
+    if (silent.has(id)) {
       log(`Peer ${id.slice(-12)} silent >15s - dropping as gone.`);
       try { conn.close(); } catch {}
       dropPeer(id);
@@ -179,12 +179,17 @@ setInterval(() => {
 
 function dropPeer(id) {
   if (!conns.has(id) && !pendingName.has(id) && !roster.has(id)) return;
-  conns.delete(id); lastSeen.delete(id); pendingName.delete(id);
-  detector.onDisconnect(id, Date.now()); // announces 'left' only if this peer was ever announced 'joined'
+  conns.delete(id); pendingName.delete(id);
+  detector.onDisconnect(id, Date.now()); // emits 'left' only if this peer was ever announced
+  renderRoster();                        // covers peers dropped before they were ever announced
 }
 
 function renderRoster() {
-  $('peer-count').textContent = roster.size + 1;
+  // Everyone we hold a live connection to is listed, whether or not they've
+  // been announced yet - the count has to match reality, or a message can
+  // arrive from someone the room claims isn't here.
+  const connecting = [...pendingName.keys()].filter(id => !roster.has(id));
+  $('peer-count').textContent = roster.size + connecting.length + 1;
   const el = $('peer-list'); el.textContent = '';
   const me = document.createElement('div'); me.className = 'peer';
   me.innerHTML = `<span class="dot on"></span><span>${escapeHtml(myName)}</span><span class="you">you · seat ${mySeat}</span>`;
@@ -192,6 +197,11 @@ function renderRoster() {
   for (const [, name] of roster) {
     const d = document.createElement('div'); d.className = 'peer';
     d.innerHTML = `<span class="dot on"></span><span>${escapeHtml(name)}</span>`;
+    el.appendChild(d);
+  }
+  for (const id of connecting) {
+    const d = document.createElement('div'); d.className = 'peer';
+    d.innerHTML = `<span class="dot"></span><span style="opacity:.65">${escapeHtml(pendingName.get(id))}</span><span class="you">connecting…</span>`;
     el.appendChild(d);
   }
 }
@@ -207,18 +217,17 @@ function addMsg(who, text, cls) {
 function wireConn(conn) {
   conn.on('open', () => {
     conns.set(conn.peer, conn);
-    lastSeen.set(conn.peer, Date.now());
     conn.send({ t: 'hello', name: myName });
     detector.onConnect(conn.peer, Date.now());
     log(`Connected to ${conn.peer.slice(-12)} (${conns.size} peer link${conns.size === 1 ? '' : 's'}).`);
   });
   conn.on('data', d => {
-    lastSeen.set(conn.peer, Date.now());
     detector.onData(conn.peer, Date.now());
     if (!d || typeof d !== 'object') return;
     if (d.t === 'hello') {
       pendingName.set(conn.peer, d.name);
-      if (roster.has(conn.peer)) { roster.set(conn.peer, d.name); renderRoster(); } // already trusted - just refresh the name
+      if (roster.has(conn.peer)) roster.set(conn.peer, d.name); // already announced - just refresh the name
+      renderRoster();                                           // shows them as "connecting…" until announced
     } else if (d.t === 'chat') {
       addMsg(roster.get(conn.peer) || pendingName.get(conn.peer) || 'someone', d.text);
     }
