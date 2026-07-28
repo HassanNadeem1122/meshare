@@ -1,0 +1,57 @@
+{
+ "n": 100,
+ "k": 3,
+ "mode": "gossip",
+ "room": "r660",
+ "edgesAttempted": 150,
+ "edgesLive": 150,
+ "degreeMin": 3,
+ "degreeMax": 3,
+ "degreeMedian": 3,
+ "killed": [],
+ "killMid": false,
+ "rounds": [
+  {
+   "round": 0,
+   "origin": 0,
+   "expected": 99,
+   "delivered": 99,
+   "deliveryRatio": 1,
+   "latMedianMs": 31.1,
+   "latMaxMs": 49.7,
+   "hopMedian": 13,
+   "hopMax": 25
+  },
+  {
+   "round": 1,
+   "origin": 1,
+   "expected": 99,
+   "delivered": 99,
+   "deliveryRatio": 1,
+   "latMedianMs": 28.8,
+   "latMaxMs": 41.3,
+   "hopMedian": 13,
+   "hopMax": 25
+  },
+  {
+   "round": 2,
+   "origin": 2,
+   "expected": 99,
+   "delivered": 99,
+   "deliveryRatio": 1,
+   "latMedianMs": 18.4,
+   "latMaxMs": 28.2,
+   "hopMedian": 13,
+   "hopMax": 26
+  }
+ ],
+ "deliveryRatioMedian": 1,
+ "deliveryRatioMin": 1,
+ "latMedianMs": 28.8,
+ "latMaxMs": 49.7,
+ "hopMedian": 13,
+ "hopMax": 26,
+ "wireMessagesTotal": 603,
+ "duplicatesSuppressed": 306,
+ "wireMessagesPerBroadcast": 201
+}

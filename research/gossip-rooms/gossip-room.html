@@ -1,0 +1,212 @@
+<!-- RESEARCH PROTOTYPE: partial-view gossip room.
+     N peers, each holding only k connections rather than the full mesh, with
+     eager-push flooding plus duplicate suppression. Not production code.
+
+     Params:
+       n=50            room size
+       k=4             neighbours per peer (partial view size)
+       mode=gossip     'gossip' (partial view) or 'mesh' (full mesh baseline)
+       host,port,path  local signalling server
+       msgs=5          probe broadcasts to measure
+       kill=3,7        peers destroyed before the measured broadcast
+       killMid=1       destroy those peers *during* propagation instead
+-->
+<meta charset="utf-8">
+<title>gossip room prototype</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<pre id="out" style="font:12px/1.5 ui-monospace,monospace; white-space:pre-wrap"></pre>
+<script>
+const qs = new URLSearchParams(location.search);
+const N = Number(qs.get('n') || 20);
+const K = Number(qs.get('k') || 4);
+const MODE = qs.get('mode') || 'gossip';
+const MSGS = Number(qs.get('msgs') || 5);
+const KILL = (qs.get('kill') || '').split(',').filter(s => s !== '').map(Number);
+const KILL_MID = qs.get('killMid') === '1';
+const ROOM = qs.get('room') || ('r' + Math.floor(performance.now()));
+const HOST = qs.get('host') || '127.0.0.1';
+const PORT = Number(qs.get('port') || 9000);
+const PATH = qs.get('path') || '/pg';
+
+const out = document.getElementById('out');
+const log = m => { out.textContent += m + '\n'; };
+window.__done = false; window.__results = null;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const pid = i => `gsp-${ROOM}-${i}`;
+
+// ---- partial view --------------------------------------------------------
+// HyParView maintains a small random view refreshed by periodic shuffling.
+// This prototype substitutes a deterministic small-world graph: a ring, which
+// guarantees the overlay is connected, plus power-of-two chords, which keep
+// the diameter logarithmic instead of linear. Deterministic so that every run
+// is reproducible; the trade-off versus real HyParView is noted in FINDINGS.
+function neighbours(i) {
+  if (MODE === 'mesh') {
+    const all = []; for (let j = 0; j < N; j++) if (j !== i) all.push(j);
+    return all;
+  }
+  const s = new Set();
+  s.add((i + 1) % N);
+  s.add((i - 1 + N) % N);
+  let div = 2;
+  while (s.size < K && div <= N) {
+    const off = Math.round(N / div);
+    if (off > 0) { s.add((i + off) % N); }
+    div *= 2;
+    if (div > N * 2) break;
+  }
+  s.delete(i);
+  return [...s].slice(0, MODE === 'mesh' ? N : K);
+}
+
+// ---- peer state ----------------------------------------------------------
+const peers = new Map();     // i -> { peer, conns:Map(j->conn), seen:Set, recv:[] }
+const wanted = new Map();    // i -> neighbour list
+
+function mkPeer(i) {
+  return new Promise((resolve) => {
+    const p = new Peer(pid(i), { host: HOST, port: PORT, path: PATH, secure: false, debug: 0 });
+    const st = { i, peer: p, conns: new Map(), seen: new Set(), recv: [], dupes: 0, sent: 0, fwd: 0 };
+    peers.set(i, st);
+    p.on('open', () => resolve(st));
+    p.on('error', () => {});
+    p.on('connection', conn => {
+      conn.on('open', () => st.conns.set(idxOf(conn.peer), conn));
+      wire(st, conn);
+    });
+  });
+}
+const idxOf = peerId => Number(String(peerId).split('-').pop());
+
+function wire(st, conn) {
+  conn.on('data', d => {
+    if (!d || d.t !== 'msg') return;
+    if (st.seen.has(d.mid)) { st.dupes++; return; }   // duplicate suppression
+    st.seen.add(d.mid);
+    st.recv.push({ mid: d.mid, hops: d.hops, at: performance.now() });
+    // eager push: forward onward to every neighbour except the sender
+    for (const [j, c] of st.conns) {
+      if (j === idxOf(conn.peer)) continue;
+      if (c && c.open) { try { c.send({ ...d, hops: d.hops + 1 }); st.fwd++; } catch {} }
+    }
+  });
+  conn.on('error', () => {});
+}
+
+function broadcast(st, mid, text) {
+  st.seen.add(mid);
+  const m = { t: 'msg', mid, origin: st.i, text, hops: 1, sentAt: performance.now() };
+  for (const [, c] of st.conns) if (c && c.open) { try { c.send(m); st.sent++; } catch {} }
+  return m.sentAt;
+}
+
+(async () => {
+  log(`room=${ROOM} n=${N} k=${K} mode=${MODE}`);
+  const tBoot = performance.now();
+  for (let i = 0; i < N; i++) await mkPeer(i);
+  log(`registered ${peers.size} peers in ${Math.round(performance.now() - tBoot)}ms`);
+
+  // Build the overlay. Only the lower index dials, so each edge is created once.
+  const tWire = performance.now();
+  let attempted = 0;
+  for (let i = 0; i < N; i++) {
+    const st = peers.get(i);
+    const ns = neighbours(i);
+    wanted.set(i, ns);
+    for (const j of ns) {
+      if (i > j) continue;
+      const conn = st.peer.connect(pid(j), { reliable: true });
+      attempted++;
+      conn.on('open', () => st.conns.set(j, conn));
+      wire(st, conn);
+      conn.on('error', () => {});
+    }
+  }
+  // wait for the overlay to settle
+  const settleCap = performance.now() + Math.min(120000, 20000 + N * 400);
+  let live = 0;
+  while (performance.now() < settleCap) {
+    await sleep(1000);
+    live = [...peers.values()].reduce((a, s) => a + s.conns.size, 0) / 2;
+    if (live >= attempted * 0.98) break;
+  }
+  const degrees = [...peers.values()].map(s => s.conns.size);
+  log(`overlay: ${Math.round(live)}/${attempted} edges in ${Math.round(performance.now() - tWire)}ms, degree min/med/max = ${Math.min(...degrees)}/${degrees.slice().sort((a,b)=>a-b)[Math.floor(degrees.length/2)]}/${Math.max(...degrees)}`);
+
+  if (KILL.length && !KILL_MID) {
+    for (const i of KILL) { const s = peers.get(i); if (s) { try { s.peer.destroy(); } catch {} peers.delete(i); } }
+    await sleep(2000);
+    log(`killed peers [${KILL}] before broadcast`);
+  }
+
+  // ---- measured broadcasts ----
+  const rounds = [];
+  for (let r = 0; r < MSGS; r++) {
+    const origin = peers.get([...peers.keys()][r % peers.size]);
+    if (!origin) continue;
+    for (const s of peers.values()) { s.recv.length = 0; }
+    const mid = `m${r}`;
+    const t0 = broadcast(origin, mid, 'probe');
+    if (KILL.length && KILL_MID) {
+      setTimeout(() => { for (const i of KILL) { const s = peers.get(i); if (s) { try { s.peer.destroy(); } catch {} peers.delete(i); } } }, 15);
+    }
+    await sleep(Math.max(4000, N * 60));
+    const others = [...peers.values()].filter(s => s !== origin);
+    const got = others.filter(s => s.recv.some(x => x.mid === mid));
+    const lat = got.map(s => s.recv.find(x => x.mid === mid).at - t0).sort((a, b) => a - b);
+    const hops = got.map(s => s.recv.find(x => x.mid === mid).hops).sort((a, b) => a - b);
+    // Per-peer (hop, latency) pairs. If wall-clock latency really reflects
+    // hop-by-hop propagation, these must correlate strongly; if they do not,
+    // the timing is dominated by something else (e.g. shared event loop).
+    const pairs = got.map(s => { const x = s.recv.find(y => y.mid === mid); return [x.hops, +(x.at - t0).toFixed(2)]; });
+    const mean = a => a.reduce((p, c) => p + c, 0) / a.length;
+    let corr = null;
+    if (pairs.length > 2) {
+      const hs = pairs.map(p => p[0]), ls = pairs.map(p => p[1]);
+      const mh = mean(hs), ml = mean(ls);
+      const num = hs.reduce((acc, h, idx) => acc + (h - mh) * (ls[idx] - ml), 0);
+      const den = Math.sqrt(hs.reduce((a, h) => a + (h - mh) ** 2, 0) * ls.reduce((a, l) => a + (l - ml) ** 2, 0));
+      corr = den ? +(num / den).toFixed(3) : null;
+    }
+    const byHop = {};
+    for (const [h, l] of pairs) { (byHop[h] = byHop[h] || []).push(l); }
+    const hopLatency = Object.fromEntries(Object.entries(byHop)
+      .map(([h, ls]) => [h, +(mean(ls)).toFixed(1)]).sort((a, b) => a[0] - b[0]));
+
+    rounds.push({
+      round: r, origin: origin.i, hopLatencyCorrelation: corr, meanLatencyByHop: hopLatency,
+      expected: others.length, delivered: got.length,
+      deliveryRatio: others.length ? +(got.length / others.length).toFixed(3) : null,
+      latMedianMs: lat.length ? +lat[Math.floor(lat.length / 2)].toFixed(1) : null,
+      latMaxMs: lat.length ? +lat[lat.length - 1].toFixed(1) : null,
+      hopMedian: hops.length ? hops[Math.floor(hops.length / 2)] : null,
+      hopMax: hops.length ? hops[hops.length - 1] : null
+    });
+    log(`  msg${r} from ${origin.i}: delivered ${got.length}/${others.length} ` +
+        `lat med=${rounds[r].latMedianMs}ms max=${rounds[r].latMaxMs}ms hops med=${rounds[r].hopMedian} max=${rounds[r].hopMax}`);
+  }
+
+  const okRounds = rounds.filter(r => r.deliveryRatio != null);
+  const med = a => a.length ? a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)] : null;
+  const totalMsgs = [...peers.values()].reduce((a, s) => a + s.sent + s.fwd, 0);
+  const totalDupes = [...peers.values()].reduce((a, s) => a + s.dupes, 0);
+  window.__results = {
+    n: N, k: K, mode: MODE, room: ROOM,
+    edgesAttempted: attempted, edgesLive: Math.round(live),
+    degreeMin: Math.min(...degrees), degreeMax: Math.max(...degrees),
+    degreeMedian: degrees.slice().sort((a,b)=>a-b)[Math.floor(degrees.length/2)],
+    killed: KILL, killMid: KILL_MID,
+    rounds,
+    deliveryRatioMedian: med(okRounds.map(r => r.deliveryRatio)),
+    deliveryRatioMin: okRounds.length ? Math.min(...okRounds.map(r => r.deliveryRatio)) : null,
+    latMedianMs: med(okRounds.map(r => r.latMedianMs)),
+    latMaxMs: okRounds.length ? Math.max(...okRounds.map(r => r.latMaxMs)) : null,
+    hopMedian: med(okRounds.map(r => r.hopMedian)),
+    hopMax: okRounds.length ? Math.max(...okRounds.map(r => r.hopMax)) : null,
+    wireMessagesTotal: totalMsgs, duplicatesSuppressed: totalDupes,
+    wireMessagesPerBroadcast: MSGS ? Math.round(totalMsgs / MSGS) : null
+  };
+  log('\n' + JSON.stringify(window.__results, null, 1).slice(0, 1200));
+  window.__done = true;
+})().catch(e => { log('FATAL ' + (e.message || e)); window.__done = true; });
+</script>

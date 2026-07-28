@@ -2,7 +2,7 @@
 
 Measurement studies on meshare's own behaviour. Each study is self-contained:
 a harness that can be re-run, the raw per-run data it produced, and a write-up
-that reports what was found — including the cases where the expected result did
+that reports what was found, including the cases where the expected result did
 not appear.
 
 Code in here is **not** part of the meshare product and is not shipped to
@@ -12,6 +12,7 @@ the relevant production code links back to the findings.
 | Study | Question | Outcome |
 |---|---|---|
 | [seeder-selection](seeder-selection/FINDINGS.md) | Does probing seeders for latency or bandwidth beat taking the first one that answers? | Latency probing never won in any condition tested. Connection-race selection shipped; bandwidth probing documented but held. |
+| [gossip-rooms](gossip-rooms/FINDINGS.md) | Can partial-view gossip take live rooms past the 8 peer full-mesh cap without a paid relay? | Verified to 100 peers at 100% delivery with connection count held flat. Not shipped: no demand, and full mesh is better below 8. |
 
 ## Method notes that apply to all studies
 
@@ -22,7 +23,7 @@ the relevant production code links back to the findings.
   strategies when all candidates are identical, the harness is wrong.
 - **A skeptical pass is mandatory before publishing a result**, specifically
   looking for reasons a favourable result might be an artefact. Problems found
-  this way are written up rather than quietly fixed — see the verification
+  this way are written up rather than quietly fixed. See the verification
   section of each study.
 - **Known limitations are stated plainly**, including the ones that weaken the
   conclusions.

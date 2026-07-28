@@ -1,0 +1,37 @@
+<!-- Feasibility probe: how many PeerJS identities can one page register, and
+     how fast, before the free signaling server pushes back? -->
+<meta charset="utf-8">
+<title>capacity probe</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<pre id="out" style="font:12px ui-monospace,monospace"></pre>
+<script>
+const N = Number(new URLSearchParams(location.search).get('n') || 20);
+const TAG = new URLSearchParams(location.search).get('tag') || 't';
+const out = document.getElementById('out');
+const log = m => { out.textContent += m + '\n'; };
+window.__done = false;
+(async () => {
+  const t0 = performance.now();
+  const peers = [], opened = [], failed = [];
+  for (let i = 0; i < N; i++) {
+    const id = `cap-${TAG}-${i}`;
+    const p = new Peer(id, { debug: 0 });
+    peers.push(p);
+    p.on('open', () => opened.push({ i, at: performance.now() - t0 }));
+    p.on('error', e => failed.push({ i, type: e.type }));
+  }
+  // give the signaling server a generous window to register everyone
+  await new Promise(r => setTimeout(r, Number(new URLSearchParams(location.search).get("wait")||45000)));
+  const times = opened.map(o => o.at).sort((a, b) => a - b);
+  window.__results = {
+    requested: N, opened: opened.length, failed: failed.length,
+    failTypes: [...new Set(failed.map(f => f.type))],
+    firstOpenMs: Math.round(times[0] || 0),
+    lastOpenMs: Math.round(times[times.length - 1] || 0),
+    medianOpenMs: Math.round(times[Math.floor(times.length / 2)] || 0)
+  };
+  log(JSON.stringify(window.__results, null, 1));
+  peers.forEach(p => { try { p.destroy(); } catch {} });
+  window.__done = true;
+})();
+</script>

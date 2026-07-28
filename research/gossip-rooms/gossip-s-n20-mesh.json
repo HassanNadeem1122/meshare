@@ -1,0 +1,57 @@
+{
+ "n": 20,
+ "k": 4,
+ "mode": "mesh",
+ "room": "r564",
+ "edgesAttempted": 190,
+ "edgesLive": 190,
+ "degreeMin": 19,
+ "degreeMax": 19,
+ "degreeMedian": 19,
+ "killed": [],
+ "killMid": false,
+ "rounds": [
+  {
+   "round": 0,
+   "origin": 0,
+   "expected": 19,
+   "delivered": 19,
+   "deliveryRatio": 1,
+   "latMedianMs": 16.5,
+   "latMaxMs": 23.3,
+   "hopMedian": 1,
+   "hopMax": 1
+  },
+  {
+   "round": 1,
+   "origin": 1,
+   "expected": 19,
+   "delivered": 19,
+   "deliveryRatio": 1,
+   "latMedianMs": 7.1,
+   "latMaxMs": 10.2,
+   "hopMedian": 1,
+   "hopMax": 1
+  },
+  {
+   "round": 2,
+   "origin": 2,
+   "expected": 19,
+   "delivered": 19,
+   "deliveryRatio": 1,
+   "latMedianMs": 16.2,
+   "latMaxMs": 28.6,
+   "hopMedian": 1,
+   "hopMax": 1
+  }
+ ],
+ "deliveryRatioMedian": 1,
+ "deliveryRatioMin": 1,
+ "latMedianMs": 16.2,
+ "latMaxMs": 28.6,
+ "hopMedian": 1,
+ "hopMax": 1,
+ "wireMessagesTotal": 1083,
+ "duplicatesSuppressed": 1026,
+ "wireMessagesPerBroadcast": 361
+}
