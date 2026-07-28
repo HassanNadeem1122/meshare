@@ -1,7 +1,7 @@
 # Seeder selection in meshare: does probing beat first-responder?
 
 A measurement study of four seeder-selection strategies, run against real
-WebRTC data channels. Research code only — nothing here has been shipped into
+WebRTC data channels. Research code only. Nothing here has been shipped into
 meshare's production path.
 
 ## Problem
@@ -27,7 +27,7 @@ commits instantly and transfers in 2.5 s.
 |---|---|
 | `production` | meshare today: probe slots in order, take the first that connects |
 | `race` | open all slots simultaneously, keep whichever channel opens first |
-| `rtt` | connect to all, ping each 3×, commit to the lowest median RTT |
+| `rtt` | connect to all, ping each 3x, commit to the lowest median RTT |
 | `rttbw` | as `rtt`, plus a 64 KB probe transfer; commit to the lowest predicted completion time |
 
 **Harness.** Each seeder runs in its **own Chrome process** (separate event
@@ -42,7 +42,7 @@ available.
 machine, single uplink). Two substitutes were used, and the limits of both are
 stated in Limitations:
 - **Real paths:** forcing `iceTransportPolicy: 'relay'` routes a peer's traffic
-  through the Metered TURN server and back — a genuine internet round trip.
+  through the Metered TURN server and back, a genuine internet round trip.
   Measured separation: 1.2 ms direct vs 300 ms relayed, 0.99 MB/s vs 0.05 MB/s.
 - **Synthetic paths:** per-seeder injected delay (ms) and uplink rate cap
   (KB/s), which allow controlled, reproducible conditions including ones the
@@ -67,7 +67,7 @@ Median total time to content, in ms. Lower is better; **bold** = best in row.
 
 Conditions C and F contain **the exact same four seeders**. The only difference
 is which slot each occupies. `production` scores 8778 ms in one and 1156 ms in
-the other — a **7.6× swing driven entirely by arbitrary slot ordering**.
+the other, a **7.6x swing driven entirely by arbitrary slot ordering**.
 
 This is the study's most important finding, and it is a finding about meshare
 rather than about selection algorithms. Today's behaviour isn't "fast" or
@@ -84,20 +84,20 @@ Not once across seven conditions. Two distinct failure modes:
   still lost (1293 ms vs 889 ms), because ~900 ms of probing bought a latency
   advantage worth far less than that on a 512 KB transfer.
 - **When latency and bandwidth disagree, it is actively harmful.** In C and F
-  it reliably picked the nearby-but-slow peer — 9363 ms and 9404 ms, *worse
+  it reliably picked the nearby-but-slow peer, at 9363 ms and 9404 ms, *worse
   than doing nothing*.
 
 There is also a structural reason RTT probing struggles here: connection
 establishment time already encodes most of the same signal. `race` measures it
 for free; explicit RTT probing pays extra for a largely redundant measurement.
-That is exactly what condition D shows — `race` (902 ms) beat `rtt` (2078 ms)
+That is exactly what condition D shows. `race` (902 ms) beat `rtt` (2078 ms)
 while selecting from the same candidates, because relay paths are slow to
 *connect*, not just slow to transfer.
 
 ### 3. Bandwidth estimation is the only thing that prevents the worst case
 
 `rttbw` is the sole strategy that never lands in a multi-second hole: worst
-case 3581 ms versus 10069–10794 ms for every other strategy — a **2.8×
+case 3581 ms versus 10069 to 10794 ms for every other strategy, a **2.8x
 better worst case**. In the anti-correlated conditions it cut total time by
 74% (C) and 64% (C2).
 
@@ -115,11 +115,11 @@ enough to dominate the probe.
 ## Verification pass
 
 Applying the same skeptical discipline as the heartbeat work, before trusting
-any of the above. Four problems were found — three in the harness, one in the
-experimental design — and all four changed the results.
+any of the above. Four problems were found, three in the harness and one in the
+experimental design, and all four changed the results.
 
 1. **The experiment was initially unmeasurable, and I nearly ran it anyway.**
-   Four seeders on one machine produced an RTT spread of **0.5 ms** (1.8–2.3 ms
+   Four seeders on one machine produced an RTT spread of **0.5 ms** (1.8 to 2.3 ms
    range). Any "improvement" measured there would have been noise. This forced
    the relay/injection approach.
 2. **The relay parameter was dead code.** `iceTransportPolicy` is per-`Peer`,
@@ -131,18 +131,18 @@ experimental design — and all four changed the results.
    candidate (1411 ms total overhead). Parallelising dropped it to 419 ms.
    Reporting the original numbers would have condemned RTT selection for a flaw
    in my code rather than in the idea. A second instance of the same class of
-   error — 8 sequential pings, so probe cost scaled with the *worst*
-   candidate's latency — was found later and reduced to 3.
+   error, 8 sequential pings, so probe cost scaled with the *worst*
+   candidate's latency, was found later and reduced to 3.
 4. **Best-case seeders were placed at slot 0, flattering the baseline.** In A
    and B the fastest peer sat at index 0, which `production` always picks. That
    made a strategy with no quality signal look competent. Re-running with
-   reversed orderings (E, F) exposed the 7.6× swing described above, and turned
+   reversed orderings (E, F) exposed the 7.6x swing described above, and turned
    an apparent baseline strength into the study's main finding.
 
 **Confounds identified but not eliminated:**
 
 - *Condition D is not reproducible enough for n=3.* Raw `production` totals
-  were 2746 / 8469 / 3520 ms — real TURN throughput is genuinely unstable, so
+  were 2746 / 8469 / 3520 ms. Real TURN throughput is genuinely unstable, so
   D's medians should be read as indicative only. The synthetic conditions are
   by contrast very tight (C: 8778 / 8789 / 8765 ms).
 - *Ground truth is measured once, at the start.* Under drifting relay
@@ -165,18 +165,18 @@ experimental design — and all four changed the results.
 - **No adversarial or churn conditions.** No peers lying about capacity, no
   mid-transfer departures, no competing swarm traffic.
 - **Scale mismatch.** meshare caps at 8 seeder slots and realistically sees
-  1–3. Selection is meaningless with one candidate, where probing is pure
-  overhead. These results describe the 3–4 candidate case.
+  1 to 3. Selection is meaningless with one candidate, where probing is pure
+  overhead. These results describe the 3 to 4 candidate case.
 - **Single payload profile.** One file, sequential download from a single
   chosen peer. Multi-source swarming would change the problem entirely.
 
 ## Conclusion and recommendation
 
 **Ship `race`.** Replace "commit to the lowest-numbered live seeder" with
-"open all candidate slots and keep whichever connects first." It costs ~40–60 ms
+"open all candidate slots and keep whichever connects first." It costs ~40 to 60 ms
 over current behaviour, is never meaningfully worse in any condition tested,
 wins outright where bad paths are slow to establish (74% faster in condition
-D), and — most importantly — eliminates the arbitrary 7.6× slot-ordering
+D), and most importantly eliminates the arbitrary 7.6x slot-ordering
 lottery, which is the largest real defect this study found. Low risk, small
 diff, clear win.
 
@@ -186,12 +186,12 @@ signal it buys is largely already available for free in connection
 establishment time.
 
 **Hold `rttbw`, with a documented case for revisiting it.** It is the only
-strategy that bounds the worst case (2.8× better than everything else) and the
+strategy that bounds the worst case (2.8x better than everything else) and the
 only defence against a nearby-but-slow peer. But it costs ~344 ms when there is
-nothing to gain, that cost only amortises above roughly 1–2 MB, and it is moot
-in the 1–2 seeder case meshare usually sees. The honest blocker is that
+nothing to gain, that cost only amortises above roughly 1 to 2 MB, and it is moot
+in the 1 to 2 seeder case meshare usually sees. The honest blocker is that
 **nobody knows how often the anti-correlated case actually occurs in real
-meshare swarms** — the condition where `rttbw` earns its keep is entirely
+meshare swarms**. The condition where `rttbw` earns its keep is entirely
 synthetic here. The sensible sequence is: ship `race`, instrument real
 transfers to measure how often a better seeder was available and passed over,
 and revisit bandwidth probing behind a payload-size threshold if that data
@@ -201,7 +201,7 @@ justifies it.
 reliably beats first-responder did **not** replicate here. It holds only where
 latency correlates with throughput; where it does not, proximity selection was
 worse than no selection at all. Capacity-based selection did replicate, and
-strongly — but with a cost structure that matters at meshare's payload sizes
+strongly, but with a cost structure that matters at meshare's payload sizes
 and swarm scale.
 
 ## Reproducing
