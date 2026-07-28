@@ -1,0 +1,291 @@
+{
+ "room": "rms4rutbh",
+ "peers": 3,
+ "scenarios": [
+  {
+   "name": "A sequential edits",
+   "converged": true,
+   "stateVectorsIdentical": true,
+   "distinctVisibleStates": 1,
+   "distinctStateVectors": 1,
+   "perPeer": [
+    {
+     "id": 0,
+     "gridSize": 3,
+     "text": "",
+     "applied": 4,
+     "conns": [
+      1,
+      2
+     ]
+    },
+    {
+     "id": 1,
+     "gridSize": 3,
+     "text": "",
+     "applied": 4,
+     "conns": [
+      0,
+      2
+     ]
+    },
+    {
+     "id": 2,
+     "gridSize": 3,
+     "text": "",
+     "applied": 4,
+     "conns": [
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "B concurrent same-key writes",
+   "converged": true,
+   "stateVectorsIdentical": true,
+   "distinctVisibleStates": 1,
+   "distinctStateVectors": 1,
+   "perPeer": [
+    {
+     "id": 0,
+     "gridSize": 4,
+     "text": "",
+     "applied": 6,
+     "conns": [
+      1,
+      2
+     ]
+    },
+    {
+     "id": 1,
+     "gridSize": 4,
+     "text": "",
+     "applied": 6,
+     "conns": [
+      0,
+      2
+     ]
+    },
+    {
+     "id": 2,
+     "gridSize": 4,
+     "text": "",
+     "applied": 6,
+     "conns": [
+      0,
+      1
+     ]
+    }
+   ],
+   "winner": "from-peer-2"
+  },
+  {
+   "name": "C concurrent text insert",
+   "converged": true,
+   "stateVectorsIdentical": true,
+   "distinctVisibleStates": 1,
+   "distinctStateVectors": 1,
+   "perPeer": [
+    {
+     "id": 0,
+     "gridSize": 4,
+     "text": "<0><1><2>",
+     "applied": 8,
+     "conns": [
+      1,
+      2
+     ]
+    },
+    {
+     "id": 1,
+     "gridSize": 4,
+     "text": "<0><1><2>",
+     "applied": 8,
+     "conns": [
+      0,
+      2
+     ]
+    },
+    {
+     "id": 2,
+     "gridSize": 4,
+     "text": "<0><1><2>",
+     "applied": 8,
+     "conns": [
+      0,
+      1
+     ]
+    }
+   ],
+   "text": "<0><1><2>"
+  },
+  {
+   "name": "D partition heal",
+   "divergedWhilePartitioned": true,
+   "isolatedPeerConnections": 0,
+   "isolatedSawDuringSplit": "written-while-offline",
+   "majoritySawDuringSplit": "written-by-majority",
+   "partitionWasReal": true,
+   "converged": true,
+   "stateVectorsIdentical": true,
+   "distinctVisibleStates": 1,
+   "distinctStateVectors": 1,
+   "perPeer": [
+    {
+     "id": 0,
+     "gridSize": 5,
+     "text": "<0><1><2>",
+     "applied": 9,
+     "conns": [
+      1,
+      2
+     ]
+    },
+    {
+     "id": 1,
+     "gridSize": 5,
+     "text": "<0><1><2>",
+     "applied": 11,
+     "conns": [
+      0,
+      2
+     ]
+    },
+    {
+     "id": 2,
+     "gridSize": 5,
+     "text": "<0><1><2>",
+     "applied": 10,
+     "conns": [
+      0,
+      1
+     ]
+    }
+   ],
+   "partitionedCell": "written-while-offline",
+   "conflictCell": "offline-writer"
+  },
+  {
+   "name": "E late joiner",
+   "converged": true,
+   "stateVectorsIdentical": true,
+   "distinctVisibleStates": 1,
+   "distinctStateVectors": 1,
+   "perPeer": [
+    {
+     "id": 0,
+     "gridSize": 5,
+     "text": "<0><1><2>",
+     "applied": 10,
+     "conns": [
+      1,
+      2,
+      3
+     ]
+    },
+    {
+     "id": 1,
+     "gridSize": 5,
+     "text": "<0><1><2>",
+     "applied": 12,
+     "conns": [
+      0,
+      2,
+      3
+     ]
+    },
+    {
+     "id": 2,
+     "gridSize": 5,
+     "text": "<0><1><2>",
+     "applied": 11,
+     "conns": [
+      0,
+      1,
+      3
+     ]
+    },
+    {
+     "id": 3,
+     "gridSize": 5,
+     "text": "<0><1><2>",
+     "applied": 3,
+     "conns": [
+      0,
+      1,
+      2
+     ]
+    }
+   ],
+   "lateJoinerGridSize": 5,
+   "lateJoinerText": "<0><1><2>"
+  },
+  {
+   "name": "F propagation latency",
+   "samplesMs": [
+    8,
+    9,
+    15,
+    28,
+    69
+   ],
+   "medianMs": 15
+  }
+ ],
+ "final": {
+  "converged": true,
+  "stateVectorsIdentical": true,
+  "distinctVisibleStates": 1,
+  "distinctStateVectors": 1,
+  "perPeer": [
+   {
+    "id": 0,
+    "gridSize": 10,
+    "text": "<0><1><2>",
+    "applied": 10,
+    "conns": [
+     1,
+     2,
+     3
+    ]
+   },
+   {
+    "id": 1,
+    "gridSize": 10,
+    "text": "<0><1><2>",
+    "applied": 17,
+    "conns": [
+     0,
+     2,
+     3
+    ]
+   },
+   {
+    "id": 2,
+    "gridSize": 10,
+    "text": "<0><1><2>",
+    "applied": 16,
+    "conns": [
+     0,
+     1,
+     3
+    ]
+   },
+   {
+    "id": 3,
+    "gridSize": 10,
+    "text": "<0><1><2>",
+    "applied": 8,
+    "conns": [
+     0,
+     1,
+     2
+    ]
+   }
+  ]
+ },
+ "docSizeBytes": 367,
+ "pageErrors": []
+}

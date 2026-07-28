@@ -13,6 +13,7 @@ the relevant production code links back to the findings.
 |---|---|---|
 | [seeder-selection](seeder-selection/FINDINGS.md) | Does probing seeders for latency or bandwidth beat taking the first one that answers? | Latency probing never won in any condition tested. Connection-race selection shipped; bandwidth probing documented but held. |
 | [gossip-rooms](gossip-rooms/FINDINGS.md) | Can partial-view gossip take live rooms past the 8 peer full-mesh cap without a paid relay? | Verified to 100 peers at 100% delivery with connection count held flat. Not shipped: no demand, and full mesh is better below 8. |
+| [crdt-state](crdt-state/FINDINGS.md) | Can hosted sites get automatic shared state across viewers, using CRDTs over the existing mesh? | Convergence verified including real partition healing. No SDK built: documents grow without bound and compaction is not safe peer to peer. |
 
 ## Method notes that apply to all studies
 

@@ -1,0 +1,343 @@
+{
+ "room": "rms4rxr63",
+ "peers": 3,
+ "scenarios": [
+  {
+   "name": "A sequential edits",
+   "converged": true,
+   "stateVectorsIdentical": true,
+   "distinctVisibleStates": 1,
+   "distinctStateVectors": 1,
+   "perPeer": [
+    {
+     "id": 0,
+     "gridSize": 3,
+     "text": "",
+     "applied": 4,
+     "conns": [
+      1,
+      2
+     ]
+    },
+    {
+     "id": 1,
+     "gridSize": 3,
+     "text": "",
+     "applied": 4,
+     "conns": [
+      0,
+      2
+     ]
+    },
+    {
+     "id": 2,
+     "gridSize": 3,
+     "text": "",
+     "applied": 4,
+     "conns": [
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "B concurrent same-key writes",
+   "converged": true,
+   "stateVectorsIdentical": true,
+   "distinctVisibleStates": 1,
+   "distinctStateVectors": 1,
+   "perPeer": [
+    {
+     "id": 0,
+     "gridSize": 4,
+     "text": "",
+     "applied": 6,
+     "conns": [
+      1,
+      2
+     ]
+    },
+    {
+     "id": 1,
+     "gridSize": 4,
+     "text": "",
+     "applied": 6,
+     "conns": [
+      0,
+      2
+     ]
+    },
+    {
+     "id": 2,
+     "gridSize": 4,
+     "text": "",
+     "applied": 6,
+     "conns": [
+      0,
+      1
+     ]
+    }
+   ],
+   "winner": "from-peer-0"
+  },
+  {
+   "name": "C concurrent text insert",
+   "converged": true,
+   "stateVectorsIdentical": true,
+   "distinctVisibleStates": 1,
+   "distinctStateVectors": 1,
+   "perPeer": [
+    {
+     "id": 0,
+     "gridSize": 4,
+     "text": "<1><2><0>",
+     "applied": 8,
+     "conns": [
+      1,
+      2
+     ]
+    },
+    {
+     "id": 1,
+     "gridSize": 4,
+     "text": "<1><2><0>",
+     "applied": 8,
+     "conns": [
+      0,
+      2
+     ]
+    },
+    {
+     "id": 2,
+     "gridSize": 4,
+     "text": "<1><2><0>",
+     "applied": 8,
+     "conns": [
+      0,
+      1
+     ]
+    }
+   ],
+   "text": "<1><2><0>"
+  },
+  {
+   "name": "D partition heal",
+   "divergedWhilePartitioned": true,
+   "isolatedPeerConnections": 0,
+   "isolatedSawDuringSplit": "written-while-offline",
+   "majoritySawDuringSplit": "written-by-majority",
+   "partitionWasReal": true,
+   "converged": true,
+   "stateVectorsIdentical": true,
+   "distinctVisibleStates": 1,
+   "distinctStateVectors": 1,
+   "perPeer": [
+    {
+     "id": 0,
+     "gridSize": 5,
+     "text": "<1><2><0>",
+     "applied": 10,
+     "conns": [
+      1,
+      2
+     ]
+    },
+    {
+     "id": 1,
+     "gridSize": 5,
+     "text": "<1><2><0>",
+     "applied": 12,
+     "conns": [
+      0,
+      2
+     ]
+    },
+    {
+     "id": 2,
+     "gridSize": 5,
+     "text": "<1><2><0>",
+     "applied": 12,
+     "conns": [
+      0,
+      1
+     ]
+    }
+   ],
+   "partitionedCell": "written-by-majority",
+   "conflictCell": "online-writer"
+  },
+  {
+   "name": "E late joiner",
+   "converged": true,
+   "stateVectorsIdentical": true,
+   "distinctVisibleStates": 1,
+   "distinctStateVectors": 1,
+   "perPeer": [
+    {
+     "id": 0,
+     "gridSize": 5,
+     "text": "<1><2><0>",
+     "applied": 11,
+     "conns": [
+      1,
+      2,
+      3
+     ]
+    },
+    {
+     "id": 1,
+     "gridSize": 5,
+     "text": "<1><2><0>",
+     "applied": 13,
+     "conns": [
+      0,
+      2,
+      3
+     ]
+    },
+    {
+     "id": 2,
+     "gridSize": 5,
+     "text": "<1><2><0>",
+     "applied": 13,
+     "conns": [
+      0,
+      1,
+      3
+     ]
+    },
+    {
+     "id": 3,
+     "gridSize": 5,
+     "text": "<1><2><0>",
+     "applied": 3,
+     "conns": [
+      0,
+      1,
+      2
+     ]
+    }
+   ],
+   "lateJoinerGridSize": 5,
+   "lateJoinerText": "<1><2><0>"
+  },
+  {
+   "name": "F propagation latency",
+   "orchestratorMeasuredMs": [
+    7,
+    7,
+    9,
+    10,
+    11
+   ],
+   "inPageMeasuredMs": [
+    1,
+    1,
+    1,
+    1,
+    2
+   ],
+   "medianOrchestratorMs": 9,
+   "medianInPageMs": 1
+  },
+  {
+   "name": "G stress 100 writes x3 peers on 20 shared keys",
+   "converged": true,
+   "stateVectorsIdentical": true,
+   "distinctVisibleStates": 1,
+   "distinctStateVectors": 1,
+   "perPeer": [
+    {
+     "id": 0,
+     "gridSize": 30,
+     "text": "<1><2><0>",
+     "applied": 211,
+     "conns": [
+      1,
+      2,
+      3
+     ]
+    },
+    {
+     "id": 1,
+     "gridSize": 30,
+     "text": "<1><2><0>",
+     "applied": 218,
+     "conns": [
+      0,
+      2,
+      3
+     ]
+    },
+    {
+     "id": 2,
+     "gridSize": 30,
+     "text": "<1><2><0>",
+     "applied": 218,
+     "conns": [
+      0,
+      1,
+      3
+     ]
+    }
+   ],
+   "gridSize": 30,
+   "docBytes": 3118
+  }
+ ],
+ "final": {
+  "converged": true,
+  "stateVectorsIdentical": true,
+  "distinctVisibleStates": 1,
+  "distinctStateVectors": 1,
+  "perPeer": [
+   {
+    "id": 0,
+    "gridSize": 30,
+    "text": "<1><2><0>",
+    "applied": 211,
+    "conns": [
+     1,
+     2,
+     3
+    ]
+   },
+   {
+    "id": 1,
+    "gridSize": 30,
+    "text": "<1><2><0>",
+    "applied": 218,
+    "conns": [
+     0,
+     2,
+     3
+    ]
+   },
+   {
+    "id": 2,
+    "gridSize": 30,
+    "text": "<1><2><0>",
+    "applied": 218,
+    "conns": [
+     0,
+     1,
+     3
+    ]
+   },
+   {
+    "id": 3,
+    "gridSize": 30,
+    "text": "<1><2><0>",
+    "applied": 308,
+    "conns": [
+     0,
+     1,
+     2
+    ]
+   }
+  ]
+ },
+ "docSizeBytes": 3118,
+ "pageErrors": []
+}

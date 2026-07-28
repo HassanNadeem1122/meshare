@@ -1,0 +1,136 @@
+<!-- RESEARCH PROTOTYPE: one CRDT peer.
+     Runs in its own browser process so that peers cannot share JS objects,
+     which would otherwise be able to fake convergence.
+     Shared state is a Y.Map grid (tests concurrent writes to the SAME key)
+     plus a Y.Text line (tests concurrent insert ordering).
+     Transport is meshare's existing PeerJS DataConnections, not y-webrtc.
+     Params: id, room, n, host, port, path -->
+<meta charset="utf-8">
+<title>crdt peer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<script src="yjs-bundle.js"></script>
+<pre id="out" style="font:12px ui-monospace,monospace"></pre>
+<script>
+const Y = YJS.Y;
+const qs = new URLSearchParams(location.search);
+const ID = Number(qs.get('id'));
+const ROOM = qs.get('room');
+const N = Number(qs.get('n') || 3);
+const HOST = qs.get('host') || '127.0.0.1';
+const PORT = Number(qs.get('port') || 9000);
+const PATH = qs.get('path') || '/pg';
+const out = document.getElementById('out');
+const log = m => { out.textContent += m + '\n'; };
+
+const pid = i => `crdt-${ROOM}-${i}`;
+const b64 = u => btoa(String.fromCharCode.apply(null, u));
+const unb64 = s => { const b = atob(s); const u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; };
+
+const doc = new Y.Doc();
+const grid = doc.getMap('grid');
+const text = doc.getText('line');
+const conns = new Map();          // peer index -> DataConnection
+let peer = null;
+window.__ready = false;
+window.__applied = 0;             // remote updates applied
+window.__recvLog = [];            // {at, bytes} for latency work
+
+// A minimal Yjs provider over meshare's peer connections. Local changes are
+// encoded as updates and pushed to every connected peer; on connect the two
+// sides exchange state vectors so each can send only what the other is
+// missing, which is how a late joiner receives history rather than only
+// future edits.
+doc.on('update', (update, origin) => {
+  if (origin === 'remote') return;      // full mesh here, no need to re-flood
+  const payload = { t: 'u', u: b64(update) };
+  for (const c of conns.values()) if (c && c.open) { try { c.send(payload); } catch {} }
+});
+
+function wire(conn, idx) {
+  conn.on('data', d => {
+    if (!d || typeof d !== 'object') return;
+    if (d.t === 'sv') {
+      // peer told us what it has; reply with exactly the delta it lacks
+      const diff = Y.encodeStateAsUpdate(doc, unb64(d.sv));
+      try { conn.send({ t: 'u', u: b64(diff) }); } catch {}
+    } else if (d.t === 'u') {
+      const u = unb64(d.u);
+      Y.applyUpdate(doc, u, 'remote');
+      window.__applied++;
+      // Wall-clock stamp. Peers are separate processes so performance.now()
+      // origins differ, but Date.now() is comparable on one machine, which
+      // lets latency be measured without the orchestrator round trip in it.
+      window.__lastApplyAt = Date.now();
+      window.__recvLog.push({ at: performance.now(), bytes: u.length });
+    }
+  });
+  conn.on('open', () => {
+    conns.set(idx, conn);
+    try { conn.send({ t: 'sv', sv: b64(Y.encodeStateVector(doc)) }); } catch {}
+  });
+  conn.on('close', () => conns.delete(idx));
+  conn.on('error', () => {});
+}
+
+function connectAll() {
+  // Without this the periodic retry below silently heals a simulated
+  // partition within 2s, which makes any partition test meaningless.
+  if (window.__partitioned) return;
+  for (let j = 0; j < N; j++) {
+    if (j === ID) continue;
+    if (conns.has(j)) continue;
+    // higher index dials, lower index listens, so each pair links exactly
+    // once and a late joiner (highest index) dials everyone already present
+    if (ID < j) continue;
+    const c = peer.connect(pid(j), { reliable: true });
+    wire(c, j);
+  }
+}
+
+(async () => {
+  peer = new Peer(pid(ID), { host: HOST, port: PORT, path: PATH, secure: false, debug: 0 });
+  await new Promise(res => peer.on('open', res));
+  peer.on('connection', c => {
+    const idx = Number(String(c.peer).split('-').pop());
+    wire(c, idx);
+  });
+  peer.on('error', () => {});
+  connectAll();
+  setInterval(connectAll, 2000);     // keep trying, covers late joiners
+  log(`peer ${ID} up in room ${ROOM}`);
+  window.__ready = true;
+})();
+
+// ---- controls used by the orchestrator ----
+window.setCell = (cell, value) => { grid.set(cell, value); window.__lastSetAt = Date.now(); return window.__lastSetAt; };
+// Rapid concurrent writes across overlapping keys, to test convergence under
+// sustained load rather than a handful of discrete edits.
+window.stress = (count, keys, tag) => {
+  for (let i = 0; i < count; i++) grid.set('s' + (i % keys), tag + '-' + i);
+  window.__lastSetAt = Date.now();
+  return grid.size;
+};
+window.appendText = s => { text.insert(text.length, s); return performance.now(); };
+window.insertTextAt = (i, s) => { text.insert(i, s); return performance.now(); };
+
+window.getState = () => ({
+  id: ID,
+  grid: Object.fromEntries([...grid.entries()].sort((a, b) => a[0].localeCompare(b[0]))),
+  text: text.toString(),
+  gridSize: grid.size,
+  applied: window.__applied,
+  connections: [...conns.keys()].sort(),
+  // A fingerprint of the actual CRDT document, independent of how we read it.
+  stateVector: b64(Y.encodeStateVector(doc)),
+  docSizeBytes: Y.encodeStateAsUpdate(doc).length
+});
+
+window.cutLinks = () => {           // simulate this peer dropping off the network
+  window.__partitioned = true;
+  for (const c of conns.values()) { try { c.close(); } catch {} }
+  conns.clear();
+  return true;
+};
+window.restoreLinks = () => { window.__partitioned = false; connectAll(); return true; };
+window.connCount = () => conns.size;
+</script>
