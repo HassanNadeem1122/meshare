@@ -1,0 +1,28 @@
+# Research
+
+Measurement studies on meshare's own behaviour. Each study is self-contained:
+a harness that can be re-run, the raw per-run data it produced, and a write-up
+that reports what was found — including the cases where the expected result did
+not appear.
+
+Code in here is **not** part of the meshare product and is not shipped to
+users. Where a study led to a production change, the change is noted below and
+the relevant production code links back to the findings.
+
+| Study | Question | Outcome |
+|---|---|---|
+| [seeder-selection](seeder-selection/FINDINGS.md) | Does probing seeders for latency or bandwidth beat taking the first one that answers? | Latency probing never won in any condition tested. Connection-race selection shipped; bandwidth probing documented but held. |
+
+## Method notes that apply to all studies
+
+- **Overhead counts.** Strategies are compared on total time to the user, not
+  on how good their pick was in isolation. A better choice that takes longer to
+  arrive at is not automatically better.
+- **A null control is run first.** If a harness reports a difference between
+  strategies when all candidates are identical, the harness is wrong.
+- **A skeptical pass is mandatory before publishing a result**, specifically
+  looking for reasons a favourable result might be an artefact. Problems found
+  this way are written up rather than quietly fixed — see the verification
+  section of each study.
+- **Known limitations are stated plainly**, including the ones that weaken the
+  conclusions.

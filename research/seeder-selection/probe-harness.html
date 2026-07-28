@@ -1,0 +1,180 @@
+<!-- RESEARCH HARNESS - not part of the meshare product.
+     Spins up N seeder peers and one client peer over real PeerJS/WebRTC
+     data channels, then measures per-seeder RTT the way an RTT-based
+     selector would before committing to a transfer.
+     Query params:
+       seeders=4          how many seeder slots to stand up
+       pings=20           RTT samples per seeder
+       delays=0,0,0,0     artificial ms delay injected per seeder (for
+                          controlled experiments; 0 = untouched)
+       relay=             comma list of seeder indexes forced through TURN
+       tag=name           label written into the result blob
+-->
+<meta charset="utf-8">
+<title>meshare research - seeder probe harness</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<style>
+  body { font: 13px/1.6 ui-monospace, monospace; background: #0f1517; color: #cfe; padding: 16px; }
+  pre { white-space: pre-wrap; }
+  .err { color: #f88; }
+</style>
+<pre id="out">starting…</pre>
+<script>
+const qs = new URLSearchParams(location.search);
+const N = Number(qs.get('seeders') || 4);
+const PINGS = Number(qs.get('pings') || 20);
+const DELAYS = (qs.get('delays') || '').split(',').map(Number);
+const RELAY = new Set((qs.get('relay') || '').split(',').filter(s => s !== '').map(Number));
+const TAG = qs.get('tag') || 'untagged';
+const RUN = qs.get('run') || String(Date.now());
+
+const out = document.getElementById('out');
+const lines = [];
+const log = (m, bad) => { lines.push(m); out.innerHTML = lines.map(l => `<span class="${bad ? 'err' : ''}">${l}</span>`).join('\n'); };
+
+window.__results = null;
+window.__done = false;
+
+const ICE_BASE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.relay.metered.ca:80' }];
+let ICE = ICE_BASE.slice();
+
+async function loadTurn() {
+  try {
+    const res = await fetch('https://meshare-turn.meshareapp.workers.dev/turn-credentials');
+    const data = await res.json();
+    const turn = (data.iceServers || []).filter(s => [].concat(s.urls).some(u => /^turns?:/i.test(u)));
+    ICE = ICE_BASE.concat(turn);
+    log(`TURN: ${turn.length} relay entries loaded`);
+  } catch (e) { log(`TURN unavailable (${e.message}) - direct only`, true); }
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const seedId = n => `research-${RUN}-seed-${n}`;
+
+// A seeder: answers pings, optionally after an injected delay, and serves
+// a fixed payload so throughput can be estimated the same way a real
+// bandwidth-probing selector would.
+const PAYLOAD_BYTES = 256 * 1024;
+const payload = new Uint8Array(PAYLOAD_BYTES);
+for (let i = 0; i < PAYLOAD_BYTES; i++) payload[i] = i & 0xff;
+const CHUNK = 16 * 1024;
+
+function startSeeder(n) {
+  return new Promise((resolve, reject) => {
+    const delay = Number.isFinite(DELAYS[n]) ? DELAYS[n] : 0;
+    const p = new Peer(seedId(n), { debug: 0, config: { iceServers: ICE } });
+    p.on('open', () => {
+      p.on('connection', conn => {
+        conn.on('data', async d => {
+          if (!d || typeof d !== 'object') return;
+          if (d.t === 'ping') {
+            if (delay) await sleep(delay);
+            try { conn.send({ t: 'pong', seq: d.seq, ts: d.ts }); } catch {}
+          } else if (d.t === 'grab') {
+            if (delay) await sleep(delay);
+            for (let off = 0; off < PAYLOAD_BYTES; off += CHUNK) {
+              if (!conn.open) return;
+              try { conn.send(payload.subarray(off, Math.min(off + CHUNK, PAYLOAD_BYTES))); } catch { return; }
+              while (conn.open && conn.dataChannel && conn.dataChannel.bufferedAmount > 4 * 1024 * 1024) await sleep(10);
+            }
+            try { conn.send({ t: 'grab-done', bytes: PAYLOAD_BYTES }); } catch {}
+          }
+        });
+      });
+      log(`seeder ${n} up${delay ? ` (+${delay}ms injected)` : ''}${RELAY.has(n) ? ' [relay-forced]' : ''}`);
+      resolve(p);
+    });
+    p.on('error', e => { if (!p.open) reject(new Error(`seeder ${n}: ${e.type}`)); });
+  });
+}
+
+// The client measures each seeder exactly as a selector would: connect,
+// take PINGS RTT samples, then pull a fixed payload to estimate throughput.
+function measure(clientPeer, n, forceRelay) {
+  return new Promise(resolve => {
+    const target = seedId(n);
+    const conn = clientPeer.connect(target, { reliable: true });
+    const rtts = [];
+    let seq = 0, phase = 'rtt', grabStart = 0, grabBytes = 0, connectedAt = 0;
+    const started = performance.now();
+    const finish = (err) => {
+      try { conn.close(); } catch {}
+      const sorted = rtts.slice().sort((a, b) => a - b);
+      resolve({
+        slot: n, target, forceRelay, error: err || null,
+        samples: rtts.length,
+        rttMin: sorted.length ? +sorted[0].toFixed(2) : null,
+        rttMedian: sorted.length ? +sorted[Math.floor(sorted.length / 2)].toFixed(2) : null,
+        rttMean: sorted.length ? +(sorted.reduce((a, b) => a + b, 0) / sorted.length).toFixed(2) : null,
+        connectMs: connectedAt ? +(connectedAt - started).toFixed(1) : null,
+        throughputMBs: grabBytes && grabStart ? +((grabBytes / 1048576) / ((performance.now() - grabStart) / 1000)).toFixed(2) : null,
+        grabMs: grabBytes && grabStart ? +(performance.now() - grabStart).toFixed(1) : null
+      });
+    };
+    const timer = setTimeout(() => finish('timeout'), 25000);
+    conn.on('open', () => {
+      connectedAt = performance.now();
+      conn.send({ t: 'ping', seq: seq, ts: performance.now() });
+    });
+    conn.on('data', d => {
+      if (d && d.t === 'pong') {
+        rtts.push(performance.now() - d.ts);
+        if (++seq < PINGS) { conn.send({ t: 'ping', seq, ts: performance.now() }); }
+        else { phase = 'grab'; grabStart = performance.now(); conn.send({ t: 'grab' }); }
+        return;
+      }
+      if (d && d.t === 'grab-done') { clearTimeout(timer); return finish(null); }
+      if (d instanceof ArrayBuffer) grabBytes += d.byteLength;
+      else if (ArrayBuffer.isView(d)) grabBytes += d.byteLength;
+      else if (d instanceof Blob) grabBytes += d.size;
+    });
+    conn.on('error', e => { clearTimeout(timer); finish(`conn error: ${e.message || e}`); });
+  });
+}
+
+(async () => {
+  await loadTurn();
+  const seeders = [];
+  for (let n = 0; n < N; n++) {
+    try { seeders.push(await startSeeder(n)); } catch (e) { log(e.message, true); }
+  }
+  // Two client identities: one plain, one pinned to iceTransportPolicy
+  // 'relay' so its traffic is forced through the real TURN server instead of
+  // the loopback path. Relay policy is per-Peer, not per-connection, so a
+  // relay-forced measurement genuinely needs its own Peer.
+  const mkClient = relay => new Promise((res, rej) => {
+    const cfg = { iceServers: ICE };
+    if (relay) cfg.iceTransportPolicy = 'relay';
+    const p = new Peer({ debug: 0, config: cfg });
+    p.on('open', () => res(p));
+    p.on('error', e => { if (!p.open) rej(new Error(`client(${relay ? 'relay' : 'direct'}): ${e.type}`)); });
+  });
+  const client = await mkClient(false);
+  const clientRelay = RELAY.size ? await mkClient(true) : null;
+  log(`client up${clientRelay ? ' (+ relay-forced client)' : ''}, probing seeders sequentially…`);
+
+  const results = [];
+  for (let n = 0; n < N; n++) {
+    const useRelay = RELAY.has(n);
+    const r = await measure(useRelay ? clientRelay : client, n, useRelay);
+    results.push(r);
+    log(`  slot ${n}: rtt min=${r.rttMin}ms med=${r.rttMedian}ms  connect=${r.connectMs}ms  thr=${r.throughputMBs}MB/s${r.error ? '  ERR ' + r.error : ''}`);
+  }
+
+  const ok = results.filter(r => !r.error && r.rttMedian != null);
+  const meds = ok.map(r => r.rttMedian).sort((a, b) => a - b);
+  const spread = meds.length ? +(meds[meds.length - 1] - meds[0]).toFixed(2) : null;
+  const thr = ok.map(r => r.throughputMBs).filter(v => v != null).sort((a, b) => a - b);
+  window.__results = {
+    tag: TAG, run: RUN, seeders: N, pings: PINGS,
+    delaysApplied: DELAYS, relayForced: [...RELAY],
+    perSeeder: results,
+    rttMedianSpreadMs: spread,
+    rttMedianRange: meds.length ? [meds[0], meds[meds.length - 1]] : null,
+    throughputRangeMBs: thr.length ? [thr[0], thr[thr.length - 1]] : null
+  };
+  log(`\nRTT median spread across seeders: ${spread}ms  (range ${JSON.stringify(window.__results.rttMedianRange)})`);
+  log(`Throughput range: ${JSON.stringify(window.__results.throughputRangeMBs)} MB/s`);
+  window.__done = true;
+})().catch(e => { log('FATAL ' + (e.message || e), true); window.__done = true; });
+</script>

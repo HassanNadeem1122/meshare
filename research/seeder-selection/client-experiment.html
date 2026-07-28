@@ -1,0 +1,241 @@
+<!-- RESEARCH CLIENT: evaluates four seeder-selection strategies against the
+     SAME live seeder set inside one session, so per-run network drift can't
+     be mistaken for a strategy difference.
+     Reported metric is TOTAL time to content: selection overhead + transfer.
+     A strategy that probes for 2s then transfers in 1s has cost 3s, and is
+     worse than one that picks instantly and transfers in 2.5s.
+     Params: base=<peerId prefix> slots=4 rounds=3 bytes=524288 probe=65536
+             pings=8 relay=<comma slot list> -->
+<meta charset="utf-8">
+<title>research client</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<pre id="out" style="font:12px/1.5 ui-monospace,monospace; white-space:pre-wrap">booting…</pre>
+<script>
+const qs = new URLSearchParams(location.search);
+const BASE = qs.get('base');
+const SLOTS = Number(qs.get('slots') || 4);
+const ROUNDS = Number(qs.get('rounds') || 3);
+const BYTES = Number(qs.get('bytes') || 512 * 1024);
+const PROBE_BYTES = Number(qs.get('probe') || 64 * 1024);
+const PINGS = Number(qs.get('pings') || 8);
+const RELAY = new Set((qs.get('relay') || '').split(',').filter(s => s !== '').map(Number));
+const CONNECT_TIMEOUT = 8000;
+
+const out = document.getElementById('out');
+const log = m => { out.textContent += '\n' + m; };
+window.__done = false; window.__results = null;
+
+const slotId = n => `${BASE}-${n}`;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const median = a => { const s = a.slice().sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : null; };
+
+let clientDirect = null, clientRelay = null;
+const peerFor = n => (RELAY.has(n) && clientRelay) ? clientRelay : clientDirect;
+
+function connect(n, timeout = CONNECT_TIMEOUT) {
+  return new Promise(resolve => {
+    let settled = false;
+    const conn = peerFor(n).connect(slotId(n), { reliable: true });
+    const t = setTimeout(() => { if (!settled) { settled = true; try { conn.close(); } catch {} resolve(null); } }, timeout);
+    conn.on('open', () => { if (!settled) { settled = true; clearTimeout(t); resolve(conn); } });
+    conn.on('error', () => { if (!settled) { settled = true; clearTimeout(t); resolve(null); } });
+  });
+}
+
+function pingRTT(conn, samples) {
+  return new Promise(resolve => {
+    const rtts = []; let seq = 0;
+    const t = setTimeout(() => { conn.off('data', h); resolve(rtts); }, 15000);
+    const h = d => {
+      if (!d || d.t !== 'pong') return;
+      rtts.push(performance.now() - d.ts);
+      if (++seq < samples) conn.send({ t: 'ping', seq, ts: performance.now() });
+      else { clearTimeout(t); conn.off('data', h); resolve(rtts); }
+    };
+    conn.on('data', h);
+    conn.send({ t: 'ping', seq: 0, ts: performance.now() });
+  });
+}
+
+// Pull `bytes` and return elapsed ms. Used for both the small bandwidth probe
+// and the full transfer, so they are measured identically.
+function pull(conn, bytes, kind) {
+  return new Promise(resolve => {
+    let got = 0; const t0 = performance.now();
+    const timeout = setTimeout(() => { conn.off('data', h); resolve({ ms: null, bytes: got, error: 'timeout' }); }, 120000);
+    const h = d => {
+      if (d && d.t === `${kind}-done`) {
+        clearTimeout(timeout); conn.off('data', h);
+        return resolve({ ms: performance.now() - t0, bytes: got, error: null });
+      }
+      if (d instanceof ArrayBuffer) got += d.byteLength;
+      else if (ArrayBuffer.isView(d)) got += d.byteLength;
+      else if (d instanceof Blob) got += d.size;
+    };
+    conn.on('data', h);
+    conn.send({ t: kind, bytes });
+  });
+}
+
+const closeAll = conns => conns.forEach(c => { try { c && c.close(); } catch {} });
+
+// ---- selection strategies -------------------------------------------------
+// Mirrors meshare today: probe slots in index order, commit to the first that
+// answers. Effectively "lowest-numbered live seeder", with no quality signal.
+async function selProduction(slots) {
+  const t0 = performance.now();
+  for (const n of slots) {
+    const conn = await connect(n);
+    if (conn) return { pick: n, conn, overheadMs: performance.now() - t0, detail: {} };
+  }
+  return null;
+}
+
+// Open every slot at once, keep whichever channel opens first.
+async function selRace(slots) {
+  const t0 = performance.now();
+  const all = [];
+  const winner = await new Promise(resolve => {
+    let done = false;
+    slots.forEach(n => {
+      const conn = peerFor(n).connect(slotId(n), { reliable: true });
+      all.push(conn);
+      conn.on('open', () => { if (!done) { done = true; resolve({ n, conn }); } });
+      conn.on('error', () => {});
+    });
+    setTimeout(() => { if (!done) { done = true; resolve(null); } }, CONNECT_TIMEOUT);
+  });
+  if (!winner) { closeAll(all); return null; }
+  closeAll(all.filter(c => c !== winner.conn));
+  return { pick: winner.n, conn: winner.conn, overheadMs: performance.now() - t0, detail: {} };
+}
+
+// Probe every responding slot for RTT, commit to the lowest median.
+// Connections and pings both run in PARALLEL across slots: probing serially
+// would charge this strategy ~350ms of connection setup per extra candidate,
+// which measures the implementation rather than the idea.
+async function selRTT(slots) {
+  const t0 = performance.now();
+  const opened = (await Promise.all(slots.map(n => connect(n).then(c => c ? { n, c } : null)))).filter(Boolean);
+  if (!opened.length) return null;
+  const measured = await Promise.all(opened.map(async o => ({ n: o.n, c: o.c, rtt: median(await pingRTT(o.c, PINGS)) })));
+  measured.sort((a, b) => (a.rtt ?? 1e9) - (b.rtt ?? 1e9));
+  const best = measured[0];
+  closeAll(measured.slice(1).map(m => m.c));
+  return { pick: best.n, conn: best.c, overheadMs: performance.now() - t0,
+           detail: { rtts: measured.map(m => ({ slot: m.n, rttMs: m.rtt == null ? null : +m.rtt.toFixed(2) })) } };
+}
+
+// RTT plus a small real transfer to estimate throughput; score each candidate
+// by predicted completion time for the actual payload, then commit.
+async function selRTTBW(slots) {
+  const t0 = performance.now();
+  const opened = (await Promise.all(slots.map(n => connect(n).then(c => c ? { n, c } : null)))).filter(Boolean);
+  if (!opened.length) return null;
+  // Bandwidth probes run concurrently, which is the realistic implementation
+  // but does mean candidates briefly compete for the same downlink. Noted as
+  // a limitation rather than serialised, since serialising would add a full
+  // probe-duration per candidate to the critical path.
+  const measured = await Promise.all(opened.map(async o => {
+    const rtt = median(await pingRTT(o.c, PINGS));
+    const p = await pull(o.c, PROBE_BYTES, 'probe');
+    const bps = p.ms ? (p.bytes / (p.ms / 1000)) : 0;
+    const predictedMs = bps ? (BYTES / bps) * 1000 + (rtt || 0) : Infinity;
+    return { n: o.n, c: o.c, rtt, probeMs: p.ms, bps, predictedMs };
+  }));
+  measured.sort((a, b) => a.predictedMs - b.predictedMs);
+  const best = measured[0];
+  closeAll(measured.slice(1).map(m => m.c));
+  return { pick: best.n, conn: best.c, overheadMs: performance.now() - t0,
+           detail: { candidates: measured.map(m => ({ slot: m.n, rttMs: m.rtt == null ? null : +m.rtt.toFixed(2),
+             probeKBs: +(m.bps / 1024).toFixed(1), predictedMs: Math.round(m.predictedMs) })) } };
+}
+
+const STRATEGIES = { production: selProduction, race: selRace, rtt: selRTT, rttbw: selRTTBW };
+
+(async () => {
+  let ICE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.relay.metered.ca:80' }];
+  try {
+    const r = await fetch('https://meshare-turn.meshareapp.workers.dev/turn-credentials');
+    const d = await r.json();
+    ICE = ICE.concat((d.iceServers || []).filter(s => [].concat(s.urls).some(u => /^turns?:/i.test(u))));
+  } catch {}
+  const mk = relay => new Promise((res, rej) => {
+    const cfg = { iceServers: ICE };
+    if (relay) cfg.iceTransportPolicy = 'relay';
+    const p = new Peer({ debug: 0, config: cfg });
+    p.on('open', () => res(p));
+    p.on('error', e => { if (!p.open) rej(e); });
+  });
+  clientDirect = await mk(false);
+  if (RELAY.size) clientRelay = await mk(true);
+
+  const slots = Array.from({ length: SLOTS }, (_, i) => i);
+
+  // Ground truth: what each seeder actually costs for the real payload. Lets
+  // us score every strategy against the best choice that was available.
+  log('=== ground truth: full transfer from each seeder ===');
+  const truth = {};
+  for (const n of slots) {
+    const c = await connect(n);
+    if (!c) { truth[n] = { error: 'unreachable' }; log(`  slot ${n}: unreachable`); continue; }
+    const rtt = median(await pingRTT(c, PINGS));
+    const t = await pull(c, BYTES, 'grab');
+    truth[n] = { transferMs: t.ms == null ? null : Math.round(t.ms), rttMs: rtt == null ? null : +rtt.toFixed(2), error: t.error };
+    log(`  slot ${n}: transfer=${truth[n].transferMs}ms rtt=${truth[n].rttMs}ms${t.error ? ' ERR ' + t.error : ''}`);
+    try { c.close(); } catch {}
+    await sleep(300);
+  }
+  const reachable = slots.filter(n => truth[n] && truth[n].transferMs != null);
+  const bestSlot = reachable.sort((a, b) => truth[a].transferMs - truth[b].transferMs)[0];
+  log(`  -> best available slot = ${bestSlot} (${truth[bestSlot] && truth[bestSlot].transferMs}ms)`);
+
+  const runs = [];
+  const names = Object.keys(STRATEGIES);
+  for (let round = 0; round < ROUNDS; round++) {
+    // Rotate strategy order each round so no strategy is always first/last.
+    const order = names.slice(round % names.length).concat(names.slice(0, round % names.length));
+    log(`\n=== round ${round + 1} (order: ${order.join(' > ')}) ===`);
+    for (const name of order) {
+      const sel = await STRATEGIES[name](slots);
+      if (!sel) { runs.push({ round, strategy: name, error: 'no seeder' }); log(`  ${name}: NO SEEDER`); continue; }
+      const t = await pull(sel.conn, BYTES, 'grab');
+      try { sel.conn.close(); } catch {}
+      const total = sel.overheadMs + (t.ms || 0);
+      runs.push({
+        round, strategy: name, pick: sel.pick,
+        overheadMs: Math.round(sel.overheadMs),
+        transferMs: t.ms == null ? null : Math.round(t.ms),
+        totalMs: t.ms == null ? null : Math.round(total),
+        pickedBest: sel.pick === bestSlot,
+        detail: sel.detail, error: t.error
+      });
+      log(`  ${name.padEnd(10)} pick=${sel.pick} overhead=${Math.round(sel.overheadMs)}ms transfer=${t.ms == null ? 'ERR' : Math.round(t.ms)}ms total=${t.ms == null ? 'ERR' : Math.round(total)}ms ${sel.pick === bestSlot ? '(best)' : ''}`);
+      await sleep(500);
+    }
+  }
+
+  const summary = {};
+  for (const name of names) {
+    const rs = runs.filter(r => r.strategy === name && r.totalMs != null);
+    const totals = rs.map(r => r.totalMs).sort((a, b) => a - b);
+    summary[name] = {
+      n: rs.length,
+      medianTotalMs: median(totals),
+      meanTotalMs: totals.length ? Math.round(totals.reduce((a, b) => a + b, 0) / totals.length) : null,
+      minTotalMs: totals[0] ?? null, maxTotalMs: totals[totals.length - 1] ?? null,
+      medianOverheadMs: median(rs.map(r => r.overheadMs)),
+      pickedBestRate: rs.length ? +(rs.filter(r => r.pickedBest).length / rs.length).toFixed(2) : null,
+      picks: rs.map(r => r.pick)
+    };
+  }
+  window.__results = { base: BASE, slots: SLOTS, rounds: ROUNDS, bytes: BYTES,
+                       relayForced: [...RELAY], groundTruth: truth, bestSlot, runs, summary };
+  log('\n=== summary ===');
+  for (const name of names) {
+    const s = summary[name];
+    log(`  ${name.padEnd(10)} median total=${s.medianTotalMs}ms  overhead=${s.medianOverheadMs}ms  picked-best=${(s.pickedBestRate * 100).toFixed(0)}%  picks=[${s.picks.join(',')}]`);
+  }
+  window.__done = true;
+})().catch(e => { log('FATAL ' + (e.message || e)); window.__done = true; });
+</script>

@@ -1,0 +1,59 @@
+<!-- RESEARCH: one seeder, one browser process (own event loop, so throughput
+     numbers measure the path rather than thread contention with other seeders).
+     Params: id=<peerId>  delay=<ms added to every response>  rate=<KB/s cap> -->
+<meta charset="utf-8">
+<title>research seeder</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<pre id="out" style="font:12px ui-monospace,monospace">booting…</pre>
+<script>
+const qs = new URLSearchParams(location.search);
+const ID = qs.get('id');
+const DELAY = Number(qs.get('delay') || 0);      // simulated propagation delay
+const RATE = Number(qs.get('rate') || 0);        // KB/s cap, 0 = uncapped
+const out = document.getElementById('out');
+const log = m => { out.textContent += '\n' + m; };
+window.__ready = false;
+
+const MB = 1048576;
+const CHUNK = 16 * 1024;
+const payload = new Uint8Array(2 * MB);
+for (let i = 0; i < payload.length; i++) payload[i] = i & 0xff;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function sendBytes(conn, bytes, doneMsg) {
+  const perChunkMs = RATE ? (CHUNK / 1024) / RATE * 1000 : 0;
+  for (let off = 0; off < bytes; off += CHUNK) {
+    if (!conn.open) return;
+    const end = Math.min(off + CHUNK, bytes);
+    try { conn.send(payload.subarray(off, end)); } catch { return; }
+    if (perChunkMs) await sleep(perChunkMs);
+    while (conn.open && conn.dataChannel && conn.dataChannel.bufferedAmount > 4 * MB) await sleep(10);
+  }
+  try { conn.send({ t: doneMsg, bytes }); } catch {}
+}
+
+(async () => {
+  let ICE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.relay.metered.ca:80' }];
+  try {
+    const r = await fetch('https://meshare-turn.meshareapp.workers.dev/turn-credentials');
+    const d = await r.json();
+    ICE = ICE.concat((d.iceServers || []).filter(s => [].concat(s.urls).some(u => /^turns?:/i.test(u))));
+  } catch {}
+
+  const p = new Peer(ID, { debug: 0, config: { iceServers: ICE } });
+  p.on('open', () => {
+    log(`seeder ${ID} up  delay=${DELAY}ms rate=${RATE || 'uncapped'}KB/s`);
+    window.__ready = true;
+  });
+  p.on('error', e => log('ERR ' + e.type));
+  p.on('connection', conn => {
+    conn.on('data', async d => {
+      if (!d || typeof d !== 'object') return;
+      if (DELAY) await sleep(DELAY);
+      if (d.t === 'ping') { try { conn.send({ t: 'pong', seq: d.seq, ts: d.ts }); } catch {} }
+      else if (d.t === 'probe') sendBytes(conn, d.bytes, 'probe-done');
+      else if (d.t === 'grab') sendBytes(conn, d.bytes, 'grab-done');
+    });
+  });
+})();
+</script>

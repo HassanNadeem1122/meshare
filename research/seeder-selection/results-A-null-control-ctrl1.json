@@ -1,0 +1,382 @@
+{
+ "tag": "A-null-control",
+ "config": {
+  "tag": "A-null-control",
+  "seeders": [
+   {
+    "delay": 0
+   },
+   {
+    "delay": 0
+   },
+   {
+    "delay": 0
+   },
+   {
+    "delay": 0
+   }
+  ],
+  "rounds": 3,
+  "run": "ctrl1"
+ },
+ "results": {
+  "base": "research-ctrl1",
+  "slots": 4,
+  "rounds": 3,
+  "bytes": 524288,
+  "relayForced": [],
+  "groundTruth": {
+   "0": {
+    "transferMs": 455,
+    "rttMs": 2.3,
+    "error": null
+   },
+   "1": {
+    "transferMs": 548,
+    "rttMs": 2.4,
+    "error": null
+   },
+   "2": {
+    "transferMs": 563,
+    "rttMs": 2.6,
+    "error": null
+   },
+   "3": {
+    "transferMs": 545,
+    "rttMs": 2.3,
+    "error": null
+   }
+  },
+  "bestSlot": 0,
+  "runs": [
+   {
+    "round": 0,
+    "strategy": "production",
+    "pick": 0,
+    "overheadMs": 368,
+    "transferMs": 534,
+    "totalMs": 902,
+    "pickedBest": true,
+    "detail": {},
+    "error": null
+   },
+   {
+    "round": 0,
+    "strategy": "race",
+    "pick": 1,
+    "overheadMs": 501,
+    "transferMs": 521,
+    "totalMs": 1022,
+    "pickedBest": false,
+    "detail": {},
+    "error": null
+   },
+   {
+    "round": 0,
+    "strategy": "rtt",
+    "pick": 1,
+    "overheadMs": 1520,
+    "transferMs": 500,
+    "totalMs": 2020,
+    "pickedBest": false,
+    "detail": {
+     "rtts": [
+      {
+       "slot": 1,
+       "rttMs": 1.7
+      },
+      {
+       "slot": 0,
+       "rttMs": 1.8
+      },
+      {
+       "slot": 2,
+       "rttMs": 1.9
+      },
+      {
+       "slot": 3,
+       "rttMs": 1.9
+      }
+     ]
+    },
+    "error": null
+   },
+   {
+    "round": 0,
+    "strategy": "rttbw",
+    "pick": 1,
+    "overheadMs": 1750,
+    "transferMs": 525,
+    "totalMs": 2275,
+    "pickedBest": false,
+    "detail": {
+     "candidates": [
+      {
+       "slot": 1,
+       "rttMs": 2.1,
+       "probeKBs": 920.9,
+       "predictedMs": 558
+      },
+      {
+       "slot": 2,
+       "rttMs": 1.8,
+       "probeKBs": 891.4,
+       "predictedMs": 576
+      },
+      {
+       "slot": 3,
+       "rttMs": 2.2,
+       "probeKBs": 855.6,
+       "predictedMs": 601
+      },
+      {
+       "slot": 0,
+       "rttMs": 1.8,
+       "probeKBs": 833.3,
+       "predictedMs": 616
+      }
+     ]
+    },
+    "error": null
+   },
+   {
+    "round": 1,
+    "strategy": "race",
+    "pick": 1,
+    "overheadMs": 398,
+    "transferMs": 511,
+    "totalMs": 909,
+    "pickedBest": false,
+    "detail": {},
+    "error": null
+   },
+   {
+    "round": 1,
+    "strategy": "rtt",
+    "pick": 1,
+    "overheadMs": 1411,
+    "transferMs": 507,
+    "totalMs": 1918,
+    "pickedBest": false,
+    "detail": {
+     "rtts": [
+      {
+       "slot": 1,
+       "rttMs": 1.7
+      },
+      {
+       "slot": 0,
+       "rttMs": 1.8
+      },
+      {
+       "slot": 2,
+       "rttMs": 2.1
+      },
+      {
+       "slot": 3,
+       "rttMs": 2.2
+      }
+     ]
+    },
+    "error": null
+   },
+   {
+    "round": 1,
+    "strategy": "rttbw",
+    "pick": 3,
+    "overheadMs": 1735,
+    "transferMs": 513,
+    "totalMs": 2248,
+    "pickedBest": false,
+    "detail": {
+     "candidates": [
+      {
+       "slot": 3,
+       "rttMs": 2.1,
+       "probeKBs": 892.6,
+       "predictedMs": 576
+      },
+      {
+       "slot": 0,
+       "rttMs": 2,
+       "probeKBs": 870.7,
+       "predictedMs": 590
+      },
+      {
+       "slot": 1,
+       "rttMs": 2.1,
+       "probeKBs": 826.9,
+       "predictedMs": 621
+      },
+      {
+       "slot": 2,
+       "rttMs": 3.8,
+       "probeKBs": 761.9,
+       "predictedMs": 676
+      }
+     ]
+    },
+    "error": null
+   },
+   {
+    "round": 1,
+    "strategy": "production",
+    "pick": 0,
+    "overheadMs": 365,
+    "transferMs": 518,
+    "totalMs": 884,
+    "pickedBest": true,
+    "detail": {},
+    "error": null
+   },
+   {
+    "round": 2,
+    "strategy": "rtt",
+    "pick": 2,
+    "overheadMs": 1386,
+    "transferMs": 712,
+    "totalMs": 2098,
+    "pickedBest": false,
+    "detail": {
+     "rtts": [
+      {
+       "slot": 2,
+       "rttMs": 1.5
+      },
+      {
+       "slot": 0,
+       "rttMs": 1.6
+      },
+      {
+       "slot": 1,
+       "rttMs": 1.7
+      },
+      {
+       "slot": 3,
+       "rttMs": 1.8
+      }
+     ]
+    },
+    "error": null
+   },
+   {
+    "round": 2,
+    "strategy": "rttbw",
+    "pick": 3,
+    "overheadMs": 1686,
+    "transferMs": 536,
+    "totalMs": 2222,
+    "pickedBest": false,
+    "detail": {
+     "candidates": [
+      {
+       "slot": 3,
+       "rttMs": 1.9,
+       "probeKBs": 1009.5,
+       "predictedMs": 509
+      },
+      {
+       "slot": 2,
+       "rttMs": 1.7,
+       "probeKBs": 968.2,
+       "predictedMs": 531
+      },
+      {
+       "slot": 0,
+       "rttMs": 1.7,
+       "probeKBs": 879.1,
+       "predictedMs": 584
+      },
+      {
+       "slot": 1,
+       "rttMs": 2,
+       "probeKBs": 870.7,
+       "predictedMs": 590
+      }
+     ]
+    },
+    "error": null
+   },
+   {
+    "round": 2,
+    "strategy": "production",
+    "pick": 0,
+    "overheadMs": 342,
+    "transferMs": 505,
+    "totalMs": 847,
+    "pickedBest": true,
+    "detail": {},
+    "error": null
+   },
+   {
+    "round": 2,
+    "strategy": "race",
+    "pick": 3,
+    "overheadMs": 415,
+    "transferMs": 541,
+    "totalMs": 956,
+    "pickedBest": false,
+    "detail": {},
+    "error": null
+   }
+  ],
+  "summary": {
+   "production": {
+    "n": 3,
+    "medianTotalMs": 884,
+    "meanTotalMs": 878,
+    "minTotalMs": 847,
+    "maxTotalMs": 902,
+    "medianOverheadMs": 365,
+    "pickedBestRate": 1,
+    "picks": [
+     0,
+     0,
+     0
+    ]
+   },
+   "race": {
+    "n": 3,
+    "medianTotalMs": 956,
+    "meanTotalMs": 962,
+    "minTotalMs": 909,
+    "maxTotalMs": 1022,
+    "medianOverheadMs": 415,
+    "pickedBestRate": 0,
+    "picks": [
+     1,
+     1,
+     3
+    ]
+   },
+   "rtt": {
+    "n": 3,
+    "medianTotalMs": 2020,
+    "meanTotalMs": 2012,
+    "minTotalMs": 1918,
+    "maxTotalMs": 2098,
+    "medianOverheadMs": 1411,
+    "pickedBestRate": 0,
+    "picks": [
+     1,
+     1,
+     2
+    ]
+   },
+   "rttbw": {
+    "n": 3,
+    "medianTotalMs": 2248,
+    "meanTotalMs": 2248,
+    "minTotalMs": 2222,
+    "maxTotalMs": 2275,
+    "medianOverheadMs": 1735,
+    "pickedBestRate": 0,
+    "picks": [
+     1,
+     3,
+     3
+    ]
+   }
+  }
+ }
+}
