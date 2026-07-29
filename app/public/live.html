@@ -5,6 +5,7 @@
 <link rel="icon" href="icon-192.png" type="image/png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
 <script src="heartbeat-detector.js"></script>
+<script src="retry-scheduler.js"></script>
 <style>
   :root {
     --bg: #f3f3ee; --card: #ffffff; --card-2: #f0f0e8; --line: #e4e4da;
@@ -151,9 +152,49 @@ const detector = new MeshareHeartbeat.AsymmetricDetector(({ type, peerId }) => {
 
 // Heartbeat: a killed tab / dropped network never fires 'close', which would
 // leave a ghost member in the roster. Ping every 5s; silence >15s = gone.
+//
 // Also self-heals: if the link to a lower seat is missing (signaling hiccup
-// at join, member dropped and rejoined), keep retrying the connection.
-const lastTry = new Map();   // seatId -> ms timestamp of last connect attempt
+// at join, member dropped and rejoined), keep retrying the connection. The
+// wait before each retry is scaled by that peer's last-known distance
+// (StaggeredRetry, SRM-inspired - see retry-scheduler.js) and fires on a
+// real per-target setTimeout rather than the next 5s tick: research found
+// that staggering the wait alone does nothing if the outer loop still only
+// checks at fixed poll boundaries, since a short computed wait just gets
+// rounded up to the same tick everyone else lands on. See
+// research/retry-scheduling/FINDINGS.md.
+const retryScheduler = new MeshareRetry.StaggeredRetry({ C1: 1, C2: 1 });
+const retryTimers = new Map();   // seatId -> setTimeout handle
+const peerDistance = new Map();  // seatId -> last-measured RTT estimate, ms
+const DEFAULT_DISTANCE_MS = 200; // SRM's own historical default before real distance data existed
+
+async function measureDistance(conn) {
+  await new Promise(r => setTimeout(r, 400));
+  try {
+    const stats = await conn.peerConnection.getStats();
+    let pair = null;
+    stats.forEach(s => { if (s.type === 'transport' && s.selectedCandidatePairId) pair = stats.get(s.selectedCandidatePairId); });
+    if (pair && typeof pair.currentRoundTripTime === 'number') {
+      peerDistance.set(conn.peer, Math.round(pair.currentRoundTripTime * 1000));
+    }
+  } catch {}
+}
+
+function attemptRetry(id) {
+  retryTimers.delete(id);
+  retryScheduler.onAttempt(id, Date.now());
+  if (conns.has(id) || !peer || !peer.open) return;
+  wireConn(peer.connect(id, { reliable: true }));
+}
+
+function scheduleRetryIfMissing(id, now) {
+  if (conns.has(id) || retryTimers.has(id)) return;
+  const distance = peerDistance.get(id) || DEFAULT_DISTANCE_MS;
+  retryScheduler.scheduleRetry(id, now, distance);
+  const fireAt = retryScheduler.pending.get(id);
+  if (fireAt == null) return;
+  retryTimers.set(id, setTimeout(() => attemptRetry(id), Math.max(0, fireAt - now)));
+}
+
 setInterval(() => {
   const now = Date.now();
   const silent = new Set(detector.silentPeers(now));
@@ -167,13 +208,7 @@ setInterval(() => {
     }
   }
   if (peer && peer.open && mySeat != null) {
-    for (let n = 0; n < mySeat; n++) {
-      const id = seatName(roomId, n);
-      if (!conns.has(id) && now - (lastTry.get(id) || 0) > 10000) {
-        lastTry.set(id, now);
-        wireConn(peer.connect(id, { reliable: true }));
-      }
-    }
+    for (let n = 0; n < mySeat; n++) scheduleRetryIfMissing(seatName(roomId, n), now);
   }
 }, 5000);
 
@@ -219,6 +254,10 @@ function wireConn(conn) {
     conns.set(conn.peer, conn);
     conn.send({ t: 'hello', name: myName });
     detector.onConnect(conn.peer, Date.now());
+    measureDistance(conn);
+    const t = retryTimers.get(conn.peer);
+    if (t) { clearTimeout(t); retryTimers.delete(conn.peer); }
+    retryScheduler.onAttempt(conn.peer, Date.now());
     log(`Connected to ${conn.peer.slice(-12)} (${conns.size} peer link${conns.size === 1 ? '' : 's'}).`);
   });
   conn.on('data', d => {
