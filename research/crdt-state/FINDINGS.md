@@ -120,6 +120,18 @@ The document grew from 367 bytes to 3,118 bytes after the stress scenario. That
 prompted a direct measurement of growth, which produced the central negative
 result of this study, below.
 
+**4. The first explanation of that failure was wrong, and was corrected later.**
+
+Finding the growth was right. Explaining it was not. The first version of this
+study attributed it to CRDT history retention as a general property, which is
+the intuitive reading and is what the numbers appear to show if write count is
+the only variable examined. Holding write count fixed and varying write *order*
+instead produces a 300x swing, which no history-retention account predicts. The
+corrected attribution is in "What actually drives the growth" below. The
+conclusion this study reached did not change; the reasoning behind it was
+wrong, and a reader who accepted the original explanation would have drawn the
+wrong lesson about which fixes were worth trying.
+
 ## The blocking problem: unbounded growth
 
 Writing repeatedly to a small fixed set of keys does not reuse space. The
@@ -128,16 +140,89 @@ regardless of how few cells are actually live.
 
 | Writes | Live cells | Document size | Bytes per write |
 |---|---|---|---|
-| 100 | 20 | 927 B | 9.3 |
-| 1,000 | 20 | 9,001 B | 9.0 |
-| 5,000 | 20 | 45,021 B | 9.0 |
-| 20,000 | 20 | 183,639 B | 9.2 |
+| 100 | 20 | 925 B | 9.3 |
+| 1,000 | 20 | 9,081 B | 9.1 |
+| 5,000 | 20 | 45,101 B | 9.0 |
+| 20,000 | 20 | 183,719 B | 9.2 |
 
 After 20,000 writes the document holds 20 live cells worth roughly 240 bytes of
-actual data, in 183,639 bytes of storage. That is a **765x overhead**, and it
+actual data, in 183,719 bytes of storage. That is a **438x overhead**, and it
 keeps growing. More importantly, **a peer joining late must download all of it**
 to see those 20 cells, because history is how the CRDT knows the ordering is
 correct.
+
+### What actually drives the growth
+
+**A correction to the first version of this study.** The growth above was
+originally attributed to CRDT history retention in general: the claim was that
+a CRDT must keep its operation history, therefore the document must grow. That
+attribution was wrong, and a follow-up measurement (`measure-growth.js`) shows
+what the dominant term really is.
+
+Same 20,000 writes. Same 20 keys. Same final values. **Only the order differs:**
+
+| Write order | Document size |
+|---|---|
+| Round-robin across 20 keys (what the stress test did) | 183,659 B |
+| Grouped: all writes to `s0`, then all to `s1`, ... | **611 B** |
+| Round-robin, each round batched into one transaction | 183,619 B |
+| 20,000 writes to a single key | 51 B |
+
+**A 300x difference from write ordering alone.** Yjs run-length-merges
+consecutive structs belonging to the same client: a stretch of deleted items
+collapses into one compact run, but only if those items are *adjacent in that
+client's operation log*. Hammering one key produces adjacency, so it collapses
+to almost nothing. Round-robin across 20 keys interleaves them, nothing merges,
+and every write keeps its own struct at ~9 bytes forever.
+
+Batching each round into a single `doc.transact()` did not help, which rules
+out transaction boundaries and confirms the mechanism is struct adjacency.
+
+This is not a `Y.Map` property. `Y.Text` shows exactly the same effect:
+
+| Y.Text operation, 5,000 edits | Document size |
+|---|---|
+| Append to the end (contiguous) | 5,015 B (1.0 B/char) |
+| Insert at position 0 (scattered) | 49,878 B (10.0 B/char) |
+| Delete-all and reinsert, repeatedly (contiguous) | 41 B |
+
+So the correct statement is not "CRDTs grow." It is: **Yjs's cost is driven by
+how fragmented a client's operation log is, and interleaved writes across
+independent keys are the worst case for it.** Study 1's `Y.Map` grid of 20
+unrelated cells is precisely that worst case, because a sequence CRDT is being
+used for state that has no sequence in it.
+
+**The original conclusion still holds**, and should not be softened: real
+shared-state access *is* interleaved. Nobody writes a whiteboard or a game
+board one cell at a time to exhaustion. The 611 B figure is a diagnostic that
+identifies the mechanism, not an achievable optimisation, because write order
+is the application's, not the library's. Growth remains linear and unbounded
+for any realistic access pattern. Only the explanation changes, and it changes
+in a way that matters: the cost is specific to using a sequence CRDT for
+unordered key-value state, not inherent to replicated data types.
+
+### `gc` was already enabled, so it is not the fix
+
+`crdt-peer.html` constructs `new Y.Doc()` with no options. Yjs's own default is
+`gc: true`, so the prototype was already garbage collecting throughout. Turning
+it off is strictly worse:
+
+| Writes | `gc: true` | `gc: false` |
+|---|---|---|
+| 1,000 | 9,081 B | 15,831 B |
+| 20,000 | 183,719 B | 352,429 B |
+
+GC is buying roughly 2x and is already switched on. There is no configuration
+change available that alters the growth class.
+
+**Measurement variance worth recording:** repeated runs of the identical
+20,000-write round-robin produce sizes between roughly 163 KB and 184 KB. Yjs
+assigns a random `clientID` per document, and that changes how efficiently
+identifiers encode. This explains why the first pass of this study reported
+183,639 B in one place and 163,657 B in another: those were not two different
+measurements of different things, they were the same measurement re-run. The
+per-write cost of ~8 to 9 bytes is stable across runs; the absolute total is
+not, to about 10%.
 
 For the intended use case this is severe. A shared whiteboard or a game board
 updates continuously. At ten writes per second, a thirty minute session
@@ -146,21 +231,51 @@ long-lived hosted site would grow without limit.
 
 ### Compaction exists but is not safe in a peer to peer setting
 
-Rebuilding a document from only its current values shrinks it from 163,657 bytes
-to 339 bytes, a 483x reduction. Yjs does not do this automatically: passing the
-document through a fresh instance returns exactly the same size.
+Rebuilding a document from only its current values shrinks it from 183,659
+bytes to 359 bytes, a 511x reduction. Yjs does not do this automatically:
+passing the document through a fresh instance returns exactly the same size.
 
 The problem is what happens when a compacted document meets a peer that still
-holds the history. Merging the two produced a document of 163,834 bytes, which
-is larger than before, not smaller. The compacted copy does not replace history,
-it simply adds more operations on top of it. Compaction therefore only works if
-every peer discards its history at the same moment and adopts the new document
-together, and any peer that later reconnects holding the old version
-reintroduces all of it.
+holds the history. Merging the two produced a document of 183,836 bytes, which
+is larger than before, not smaller.
 
-Agreeing on that moment across a set of peers with no coordinator is a
-distributed consensus problem. meshare has no mechanism for it, and adding one
-would mean adding the kind of coordination point the project exists to avoid.
+**Why, precisely.** The rebuilt document is a new `Y.Doc`, and therefore carries
+a **different `clientID`** (confirmed directly in `measure-growth.js`). It is
+not a smaller version of the same document. It is a fresh set of operations,
+authored by what Yjs considers a different participant, that happen to produce
+the same visible values. Merging unions operation sets, so the result is the
+old history *plus* a second client's worth of new history.
+
+This generalises past Yjs entirely, and is the real reason the obvious fix
+cannot work:
+
+> Merge in a CRDT is a **join** in a semi-lattice. Joins are monotone: the
+> result is always at least as large as both inputs. No sequence of merges can
+> ever shrink state.
+
+That is not a Yjs limitation. It is the exact property that lets peers converge
+in any order, with duplicates, with no coordinator. Compaction cannot be
+expressed as a merge, because compaction must go *down* and merge only goes
+*up*. Shrinking requires every peer to simultaneously **replace** its state
+rather than join it, which means stepping outside the merge protocol
+altogether.
+
+Compaction therefore only works if every peer discards its history at the same
+moment and adopts the new document together, and any peer that later reconnects
+holding the old version reintroduces all of it. Agreeing on that moment across
+a set of peers with no coordinator is a distributed consensus problem. meshare
+has no mechanism for it, and adding one would mean adding the kind of
+coordination point the project exists to avoid.
+
+The formal name for the property that would make discarding safe is **causal
+stability**: an operation is causally stable once every peer is known to have
+seen it, after which no future concurrent operation can arrive that still needs
+it for conflict resolution. Computing it requires each peer to know every other
+peer's version vector and take the minimum, which in turn requires agreed
+membership: knowing exactly who "everyone" is. In a browser mesh where
+participants close tabs without warning, stability stops advancing for the
+whole group the moment one peer goes quiet. That membership agreement is the
+coordinator-shaped requirement, restated.
 
 ## Other costs
 
@@ -176,6 +291,24 @@ would mean adding the kind of coordination point the project exists to avoid.
 
 ## Limitations
 
+- **Yjs was never in production meshare.** It exists only in this study's
+  prototype (`crdt-peer.html`). `app/public/` contains no Yjs and no shared
+  CRDT state of any kind. Live-room chat is a direct broadcast over the data
+  channel that appends to the DOM (`live.html`, the `t: 'chat'` branch), with
+  no persistence, no set semantics and no delete, so it is not an
+  observed-remove set or any other CRDT. The roster is local-only: each peer
+  derives it from its own connections and never merges it with anyone. Every
+  result in this study describes the prototype, not the shipped product, and
+  nothing here should be described as a property of meshare as deployed.
+- **Only one CRDT library was tested.** Every growth figure is a property of
+  Yjs specifically. The corrected attribution above (struct fragmentation from
+  interleaved writes) is a Yjs implementation characteristic. Other designs
+  behave differently in kind, not just degree: an optimised observed-remove set
+  of the sort in Baquero's `delta-enabled-crdts` stores live data plus an
+  `O(peers)` version vector and infers deletions from it, so it has no
+  operation history to accumulate and nothing to garbage collect. No such
+  alternative was implemented or measured here, so the comparison is drawn from
+  reading that reference implementation, not from a benchmark.
 - One machine, loopback only. No real network conditions, no packet loss, no
   genuinely distant peers.
 - Three to four peers. Nothing was tested at the scale Study 2 examined.
@@ -204,9 +337,12 @@ writes across three peers onto overlapping keys converge to identical state
 vectors. The CRDT layer itself adds close to no latency.
 
 What blocks generalisation is that the document grows forever, at roughly 9
-bytes per write, with a 765x storage overhead in the tested pattern, and the
+bytes per write, with a 438x storage overhead in the tested pattern, and the
 obvious fix is not safe without a coordination mechanism meshare does not have
-and should not want. A shared-state SDK offered to arbitrary hosted sites would
+and should not want. The corrected attribution does not change that conclusion,
+but it does change what the fix would be: the cost comes from using a sequence
+CRDT for unordered key-value state, so the first thing to try is not compaction
+at all, but a data type that never accumulates history in the first place. A shared-state SDK offered to arbitrary hosted sites would
 work impressively in a demo and degrade steadily in real use, with the cost
 falling hardest on the newest visitor, who must download the entire history
 before seeing anything.
@@ -226,11 +362,30 @@ Recommended sequence, if this is taken further:
    conditions rather than loopback, more than four peers, sessions long enough
    for growth to be observed in situ, and malicious updates from untrusted
    visitors.
-4. Treat compaction as an open research question rather than an implementation
-   detail. It is the thing standing between this prototype and a general
-   feature.
+4. Before treating compaction as the open question, try the cheaper thing
+   first: replace the `Y.Map` grid with a data type built for unordered
+   key-value state, such as an observed-remove map of multi-value registers.
+   That approach stores live values plus an `O(peers)` causal context rather
+   than an operation log, which would make growth a function of cell count and
+   peer count instead of write count. If that holds, compaction stops being
+   necessary for this use case rather than remaining blocked on consensus.
+
+   **This was done. See [ormap-cells](../ormap-cells/FINDINGS.md).** The
+   premise held: growth becomes a function of live values rather than writes,
+   and is invariant to write order where Yjs swings 274x on identical data. It
+   is still not shipped, for an unrelated reason found in the process, that
+   meshare's seat names are reused across occupants and using them as CRDT
+   actor ids causes silent, partial data destruction that still converges. One
+   correction to the cost model quoted above: the context is
+   `O(actors that have written)`, not `O(peers)`, so a peer that only observes
+   is free.
+5. Treat compaction as an open research question only for the cases the above
+   does not cover, notably real collaborative text, where retaining deleted
+   positions is genuinely required to order concurrent inserts correctly.
 
 ## Reproducing
+
+Convergence and partition scenarios, which need real peers and signalling:
 
 ```bash
 cd research/crdt-state
@@ -238,3 +393,13 @@ node run-crdt.js
 ```
 
 Raw per-run data is written to `crdt-results-<room>.json`.
+
+Growth measurements, which are local to a single document and need no network:
+
+```bash
+cd research/crdt-state
+node measure-growth.js
+```
+
+Absolute totals vary by roughly 10% between runs because Yjs assigns a random
+`clientID` per document. The per-write cost and the ordering effect are stable.

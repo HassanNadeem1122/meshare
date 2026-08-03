@@ -15,6 +15,7 @@ the relevant production code links back to the findings.
 | [gossip-rooms](gossip-rooms/FINDINGS.md) | Can partial-view gossip take live rooms past the 8 peer full-mesh cap without a paid relay? | Verified to 100 peers at 100% delivery with connection count held flat. Not shipped: no demand, and full mesh is better below 8. |
 | [crdt-state](crdt-state/FINDINGS.md) | Can hosted sites get automatic shared state across viewers, using CRDTs over the existing mesh? | Convergence verified including real partition healing. No SDK built: documents grow without bound and compaction is not safe peer to peer. |
 | [retry-scheduling](retry-scheduling/FINDINGS.md) | Does distance-scaled retry timing (SRM-inspired) stop live-room reconnect storms? | Staggering the wait alone did nothing under the old poll loop; firing on the computed time does. Shipped to `live.html`, verified live with 3 real peers. |
+| [ormap-cells](ormap-cells/FINDINGS.md) | Does a dot-based OR-Map fix the CRDT study's unbounded growth for independent key-value cells? | Growth becomes `O(live values)` not `O(writes)`, and is invariant to write order where Yjs swings 274x. Not shipped: meshare's reused seat ids would cause silent, partial data destruction. |
 
 ## Method notes that apply to all studies
 
